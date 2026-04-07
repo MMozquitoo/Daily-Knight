@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Wardrobe Knight",
+    "slug": "wardrobe-knight",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "wardrobe-knight",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.wardrobeknight.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take photos of your clothing to add them to your wardrobe.",
+        "NSCalendarsUsageDescription": "Read your calendar to recommend outfits that match your day.",
+        "NSLocationWhenInUseUsageDescription": "Get local weather to recommend the right outfit."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.wardrobeknight.app",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "CAMERA",
+        "READ_CALENDAR",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
