@@ -2,24 +2,12 @@
  * Combination Validator — Step 4
  *
  * Checks outfit-level rules on the assembled combination.
- *
- * Validation rules:
- *   - Formality consistency  → no formal top + athletic shoes
- *   - Color compatibility    → prefer neutral harmony
- *   - Weather coherence      → no summer item on rain day
- *   - Protection layer       → at least one layer in cold/rain
- *
- * If validation fails, returns the specific conflict.
- * The assembler can then pick the next-best alternative.
- *
- * Input:  RawOutfit + WardrobeItem[] (for lookup) + DailyContext
- * Output: { valid: boolean, conflicts: Conflict[] }
  */
 
-import type { DailyContext } from '@/types/context';
-import type { PaletteColor, WardrobeItem } from '@/types/wardrobe';
-import type { Conflict, RawOutfit, ValidationResult } from './types';
-import { getFormalityDistance, isNeutralColor, needsOuterwear } from './utils';
+import type { DailyContext } from '../types/context.js';
+import type { PaletteColor, WardrobeItem } from '../types/wardrobe.js';
+import type { Conflict, RawOutfit, ValidationResult } from './types.js';
+import { getFormalityDistance, isNeutralColor, needsOuterwear } from './utils.js';
 
 const RAIN_UNSAFE_TYPES = new Set(['sandals', 'shorts']);
 
@@ -38,15 +26,14 @@ export function validateOutfit(outfit: RawOutfit | null, context: DailyContext):
       message: 'Top, bottom, and shoes are required.',
       itemIds: [],
     });
-
     return { valid: false, conflicts };
   }
 
   const primaryItems = [outfit.top, outfit.bottom, outfit.shoes, outfit.outerwear].filter(Boolean) as WardrobeItem[];
+
   const formalityGap = primaryItems.some((item) =>
     primaryItems.some((other) => getFormalityDistance(item.formality, other.formality) > 1),
   );
-
   if (formalityGap) {
     conflicts.push({
       code: 'formality_mismatch',
@@ -60,7 +47,7 @@ export function validateOutfit(outfit: RawOutfit | null, context: DailyContext):
   if (accentColors.length > 1 || new Set(colors).size > 4) {
     conflicts.push({
       code: 'color_mismatch',
-      message: 'The color combination feels too busy for the app’s minimal outfit rule.',
+      message: 'The color combination is too busy.',
       itemIds: [outfit.top.id, outfit.bottom.id, outfit.shoes.id],
     });
   }
@@ -69,7 +56,7 @@ export function validateOutfit(outfit: RawOutfit | null, context: DailyContext):
   if ((context.weather.rainProbability > 30 || context.weather.temperature < 12) && rainUnsafeItems.length > 0) {
     conflicts.push({
       code: 'weather_mismatch',
-      message: 'One or more items are not suitable for today’s weather.',
+      message: 'One or more items are not suitable for today\'s weather.',
       itemIds: rainUnsafeItems.map((item) => item.id),
     });
   }
@@ -82,8 +69,5 @@ export function validateOutfit(outfit: RawOutfit | null, context: DailyContext):
     });
   }
 
-  return {
-    valid: conflicts.length === 0,
-    conflicts,
-  };
+  return { valid: conflicts.length === 0, conflicts };
 }

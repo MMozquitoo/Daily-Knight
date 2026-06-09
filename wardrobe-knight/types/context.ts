@@ -3,12 +3,11 @@
  *
  * The unified input to the decision engine.
  * Built from weather + agenda + user preferences.
- * See architecture doc Section 5: "Daily Context"
  */
 
-import { WeatherData } from './weather';
-import { AgendaSummary } from './agenda';
-import { FormalityLevel } from './wardrobe';
+import type { WeatherData } from './weather.js';
+import type { AgendaSummary } from './agenda.js';
+import type { FormalityLevel } from './wardrobe.js';
 
 export interface DailyContext {
   date: string;

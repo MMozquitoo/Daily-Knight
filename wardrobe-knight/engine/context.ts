@@ -2,31 +2,26 @@
  * Context Builder
  *
  * Combines weather data, agenda summary, and user preferences
- * into a single DailyContext object.
- *
- * This is the first step of the decision pipeline:
- *   context.ts → filter.ts → scorer.ts → assembler.ts → validator.ts → carry.ts → why.ts
- *
- * Pure function. No side effects. No API calls.
- * Data fetching happens in services/ — this module only structures the input.
+ * into a single DailyContext object for the engine.
  */
 
-import type { AgendaSummary } from '@/types/agenda';
-import type { DailyContext } from '@/types/context';
-import type { UserProfile } from '@/types/user';
-import type { WeatherData } from '@/types/weather';
+import type { AgendaSummary } from '../types/agenda.js';
+import type { DailyContext } from '../types/context.js';
+import type { FormalityLevel } from '../types/wardrobe.js';
+import type { WeatherData } from '../types/weather.js';
 
 export function buildDailyContext(
   weather: WeatherData,
   agenda: AgendaSummary,
-  userProfile: UserProfile,
+  stylePreference: FormalityLevel | 'mixed' = 'mixed',
+  location = 'Paris',
   date = new Date().toISOString().slice(0, 10),
 ): DailyContext {
   return {
     date,
-    location: userProfile.location,
+    location,
     weather,
     agenda,
-    userStylePreference: userProfile.stylePreference,
+    userStylePreference: stylePreference,
   };
 }

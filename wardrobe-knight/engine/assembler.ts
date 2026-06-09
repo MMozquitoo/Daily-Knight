@@ -2,27 +2,13 @@
  * Outfit Assembler — Step 3
  *
  * Picks the highest-scoring valid item for each required layer.
- *
- * Required layers:
- *   - top (always)
- *   - bottom (always)
- *   - shoes (always)
- *
- * Conditional layers:
- *   - outerwear (if temperature/rain threshold met)
- *   - accessories (if context requires)
- *
- * Input:  ScoredItem[] + DailyContext
- * Output: Raw outfit (item IDs per layer)
- *
- * Does NOT validate combination — that's validator.ts.
  */
 
-import { ACCESSORY_SCORE_MIN, OUTERWEAR_SCORE_MIN } from '@/constants/scoring';
-import type { DailyContext } from '@/types/context';
-import type { LayerCategory, WardrobeItem } from '@/types/wardrobe';
-import type { AssembleOptions, RawOutfit, ScoredItem } from './types';
-import { needsOuterwear } from './utils';
+import { ACCESSORY_SCORE_MIN, OUTERWEAR_SCORE_MIN } from '../constants/scoring.js';
+import type { DailyContext } from '../types/context.js';
+import type { LayerCategory, WardrobeItem } from '../types/wardrobe.js';
+import type { AssembleOptions, RawOutfit, ScoredItem } from './types.js';
+import { needsOuterwear } from './utils.js';
 
 const REQUIRED_LAYERS: LayerCategory[] = ['top', 'bottom', 'shoes'];
 
@@ -35,7 +21,6 @@ function pickLayerItem(
   if (lockedId) {
     return scoredItems.find((entry) => entry.item.id === lockedId)?.item;
   }
-
   return scoredItems.find(
     (entry) =>
       entry.item.category === layer &&
@@ -50,9 +35,7 @@ export function assembleOutfit(
 ): RawOutfit | null {
   const [top, bottom, shoes] = REQUIRED_LAYERS.map((layer) => pickLayerItem(scoredItems, layer, options));
 
-  if (!top || !bottom || !shoes) {
-    return null;
-  }
+  if (!top || !bottom || !shoes) return null;
 
   const lockedOuterwearId = options.lockedLayerIds?.outerwear;
   const outerwearCandidate = lockedOuterwearId

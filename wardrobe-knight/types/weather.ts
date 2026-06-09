@@ -14,11 +14,10 @@ export interface WeatherData {
   wind: number;
 }
 
-/** Hourly forecast entry for time-of-day breakdowns */
-export interface HourlyForecast {
-  hour: number;
-  temperature: number;
-  rainProbability: number;
+/** Extended weather with daily range (for carry logic) */
+export interface DayWeather extends WeatherData {
+  tempMax: number;
+  tempMin: number;
 }
 
 /** Simplified weather conditions */
@@ -29,12 +28,3 @@ export type WeatherCondition =
   | 'snow'
   | 'storm'
   | 'fog';
-
-/** Full weather context for a day */
-export interface DayWeather {
-  current: WeatherData;
-  hourly: HourlyForecast[];
-  tempHigh: number;
-  tempLow: number;
-  fetchedAt: string;
-}

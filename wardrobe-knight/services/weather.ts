@@ -1,8 +1,10 @@
 /**
  * Weather Service — Open-Meteo (free, no API key)
+ *
+ * Adapted for Node.js — uses env vars for location instead of browser geolocation.
  */
 
-import type { WeatherCondition, WeatherData } from '@/types/weather';
+import type { WeatherCondition, WeatherData, DayWeather } from '../types/weather.js';
 
 const BASE_URL = 'https://api.open-meteo.com/v1/forecast';
 
@@ -16,11 +18,12 @@ function weatherCodeToCondition(code: number): WeatherCondition {
   return 'cloudy';
 }
 
-export async function fetchWeather(lat: number, lon: number): Promise<WeatherData> {
+export async function fetchWeather(lat: number, lon: number): Promise<DayWeather> {
   const params = new URLSearchParams({
     latitude: lat.toString(),
     longitude: lon.toString(),
     current: 'temperature_2m,apparent_temperature,precipitation_probability,wind_speed_10m,weather_code',
+    daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
     timezone: 'auto',
     forecast_days: '1',
   });
@@ -30,28 +33,41 @@ export async function fetchWeather(lat: number, lon: number): Promise<WeatherDat
 
   const data = await res.json();
   const current = data.current;
+  const daily = data.daily;
 
   return {
     temperature: Math.round(current.temperature_2m),
     feelsLike: Math.round(current.apparent_temperature),
-    rainProbability: current.precipitation_probability ?? 0,
+    rainProbability: current.precipitation_probability ?? daily.precipitation_probability_max?.[0] ?? 0,
     condition: weatherCodeToCondition(current.weather_code),
     wind: Math.round(current.wind_speed_10m),
+    tempMax: Math.round(daily.temperature_2m_max[0]),
+    tempMin: Math.round(daily.temperature_2m_min[0]),
   };
 }
 
-/** Get user's location via browser geolocation API */
-export function getUserLocation(): Promise<{ lat: number; lon: number }> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      // Default to Paris
-      resolve({ lat: 48.85, lon: 2.35 });
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-      () => resolve({ lat: 48.85, lon: 2.35 }), // fallback to Paris
-      { timeout: 5000 }
-    );
-  });
+/** Get location from environment variables */
+export function getUserLocation(): { lat: number; lon: number } {
+  return {
+    lat: parseFloat(process.env.USER_LATITUDE ?? '48.8566'),
+    lon: parseFloat(process.env.USER_LONGITUDE ?? '2.3522'),
+  };
+}
+
+/** Format weather for Slack display */
+export function formatWeatherSlack(w: DayWeather): string {
+  const conditionEmoji: Record<WeatherCondition, string> = {
+    clear: ':sunny:',
+    cloudy: ':cloud:',
+    rain: ':rain_cloud:',
+    snow: ':snowflake:',
+    storm: ':zap:',
+    fog: ':fog:',
+  };
+  const emoji = conditionEmoji[w.condition] ?? ':cloud:';
+  return [
+    `${emoji} *${w.temperature}°C* (ressenti ${w.feelsLike}°C)`,
+    `Plage : ${w.tempMin}°C – ${w.tempMax}°C`,
+    `Pluie : ${w.rainProbability}% · Vent : ${w.wind} km/h`,
+  ].join('\n');
 }

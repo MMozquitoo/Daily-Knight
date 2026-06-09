@@ -2,38 +2,23 @@
  * Outfit Engine — Public API
  *
  * Single entry point for the decision pipeline.
- * Orchestrates all steps in sequence:
- *
- *   1. filter.ts    → Remove invalid items
- *   2. scorer.ts    → Score remaining items
- *   3. assembler.ts → Pick best per layer
- *   4. validator.ts → Check combination rules
- *   5. carry.ts     → Determine carry items
- *   6. why.ts       → Generate explanation
- *
- * Exports:
- *   - generateOutfit(items, context)    → OutfitRecommendation
- *   - regenerateOutfit(items, context, exclude)  → OutfitRecommendation
- *   - swapLayer(items, context, current, layer)  → OutfitRecommendation
- *
- * This module imports NOTHING from React or Expo.
- * It is pure TypeScript — testable with plain Jest.
+ * This module imports NOTHING from Slack, Google, or any framework.
+ * It is pure TypeScript — testable with plain test runners.
  */
 
-import type { DailyContext } from '@/types/context';
-import type { OutfitRecommendation } from '@/types/outfit';
-import type { WardrobeItem } from '@/types/wardrobe';
-import { assembleOutfit } from './assembler';
-import { recommendCarry } from './carry';
-import { filterItems } from './filter';
-import type { AssembleOptions, OutfitLayer, RawOutfit, ScoredItem } from './types';
-import { validateOutfit } from './validator';
-import { generateWhy } from './why';
-import { scoreItems } from './scorer';
+import type { DailyContext } from '../types/context.js';
+import type { OutfitRecommendation } from '../types/outfit.js';
+import type { WardrobeItem } from '../types/wardrobe.js';
+import { assembleOutfit } from './assembler.js';
+import { recommendCarry } from './carry.js';
+import { filterItems } from './filter.js';
+import type { AssembleOptions, OutfitLayer, RawOutfit, ScoredItem } from './types.js';
+import { validateOutfit } from './validator.js';
+import { generateWhy } from './why.js';
+import { scoreItems } from './scorer.js';
 
 function toRecommendation(outfit: RawOutfit, context: DailyContext): OutfitRecommendation {
   const carry = recommendCarry(context);
-
   return {
     wear: {
       top: outfit.top.id,
@@ -62,9 +47,7 @@ function findValidOutfit(
     });
 
     const validation = validateOutfit(outfit, context);
-    if (outfit && validation.valid) {
-      return outfit;
-    }
+    if (outfit && validation.valid) return outfit;
 
     const conflictingIds = validation.conflicts.flatMap((conflict) => conflict.itemIds);
     const nextExcluded = conflictingIds
@@ -72,21 +55,17 @@ function findValidOutfit(
       .filter(Boolean)
       .sort((left, right) => (left?.score ?? 0) - (right?.score ?? 0))[0];
 
-    if (!nextExcluded) {
-      break;
-    }
-
+    if (!nextExcluded) break;
     excluded.add(nextExcluded.item.id);
   }
 
-  throw new Error('Unable to assemble a valid outfit from the current wardrobe.');
+  throw new Error('Impossible de composer une tenue valide avec ton armoire actuelle.');
 }
 
 export function generateOutfit(items: WardrobeItem[], context: DailyContext): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
   const scoredItems = scoreItems(filteredItems, context);
   const outfit = findValidOutfit(scoredItems, context);
-
   return toRecommendation(outfit, context);
 }
 
@@ -97,10 +76,7 @@ export function regenerateOutfit(
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
   const scoredItems = scoreItems(filteredItems, context);
-  const outfit = findValidOutfit(scoredItems, context, {
-    excludedItemIds: excludeItemIds,
-  });
-
+  const outfit = findValidOutfit(scoredItems, context, { excludedItemIds: excludeItemIds });
   return toRecommendation(outfit, context);
 }
 
@@ -112,7 +88,7 @@ export function swapLayer(
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
   const scoredItems = scoreItems(filteredItems, context);
-  const lockedLayerIds = {
+  const lockedLayerIds: Record<string, string | undefined> = {
     top: current.wear.top,
     bottom: current.wear.bottom,
     shoes: current.wear.shoes,
@@ -126,6 +102,5 @@ export function swapLayer(
     excludedItemIds: excludeItemIds,
     lockedLayerIds,
   });
-
   return toRecommendation(outfit, context);
 }

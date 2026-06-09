@@ -1,0 +1,10 @@
+node_modules/
+node_modules 2/
+dist/
+.env
+.env 2
+.DS_Store
+*.log
+package-lock 2.json
+package-lock 3.json
+.gitignore 2

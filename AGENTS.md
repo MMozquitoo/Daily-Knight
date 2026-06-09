@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -30,7 +30,7 @@ wardrobe-knight/
     weather.ts      # Open-Meteo API
     calendar.ts     # Google Calendar API v3
     sheets.ts       # Google Sheets API v4 (wardrobe CRUD)
-    parser.ts       # Claude API for natural language parsing
+    parser.ts       # Codex API for natural language parsing
   types/            # TypeScript interfaces
   constants/        # Scoring weights, why-templates, palette
 ```
@@ -57,7 +57,7 @@ The Google Sheets schema uses a 15-column `ClothingItem` type (French UI values,
 Built with `@slack/bolt` in Socket Mode. Entry point: `bot/index.ts`.
 
 Slash commands: `/outfit`, `/armoire`, `/agenda`, `/meteo`.
-Natural language: "je mets quoi ?" triggers outfit, "ajoute [vêtement]" triggers add-item flow via Claude API parsing.
+Natural language: "je mets quoi ?" triggers outfit, "ajoute [vêtement]" triggers add-item flow via Codex API parsing.
 Block Kit messages with action buttons for regenerate, more-formal, view-agenda.
 
 ### Google Sheets Database (`services/sheets.ts`)
@@ -70,7 +70,7 @@ Authentication: Google service account via `GOOGLE_SERVICE_ACCOUNT_JSON` env var
 
 - **Weather**: Open-Meteo (free, no key) — location from `USER_LATITUDE`/`USER_LONGITUDE` env vars
 - **Calendar**: Google Calendar API v3 — reads today's events, classifies formality by keywords
-- **Parser**: Claude API (Sonnet) — interprets natural language add-item messages into structured 15-column data
+- **Parser**: Codex API (Sonnet) — interprets natural language add-item messages into structured 15-column data
 - **Sheets**: Google Sheets API v4 — wardrobe CRUD operations
 
 ### Environment Variables
@@ -80,7 +80,7 @@ See `.env.example` for the full list. Required: `SLACK_BOT_TOKEN`, `SLACK_SIGNIN
 ## Key Design Decisions
 
 - **No backend/database server** — Google Sheets is the single source of truth, editable by hand.
-- **Rule-based, not AI** — Deterministic scoring engine for outfit selection. Claude API is only used for natural language parsing of add-item messages.
+- **Rule-based, not AI** — Deterministic scoring engine for outfit selection. Codex API is only used for natural language parsing of add-item messages.
 - **Socket Mode** — Bot connects via WebSocket, no public URL needed.
 - **French UI** — All bot responses, why-templates, and sheet column values are in French.
 - **Scoring weights** in `constants/scoring.ts`, **explanation templates** in `constants/why-templates.ts` — tunable without changing logic.

@@ -1,6 +1,6 @@
-import type { EventTag } from '@/types/agenda';
-import type { DailyContext } from '@/types/context';
-import type { FormalityLevel, LayerCategory, PaletteColor, WardrobeItem } from '@/types/wardrobe';
+import type { EventTag } from '../types/agenda.js';
+import type { DailyContext } from '../types/context.js';
+import type { FormalityLevel, LayerCategory, PaletteColor, WardrobeItem } from '../types/wardrobe.js';
 
 const FORMALITY_SCALE: Record<FormalityLevel, number> = {
   casual: 0,

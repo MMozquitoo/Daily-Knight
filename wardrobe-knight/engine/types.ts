@@ -1,6 +1,6 @@
-import type { CarryItem, OutfitRecommendation } from '@/types/outfit';
-import type { DailyContext } from '@/types/context';
-import type { LayerCategory, PaletteColor, WardrobeItem } from '@/types/wardrobe';
+import type { CarryItem, OutfitRecommendation } from '../types/outfit.js';
+import type { DailyContext } from '../types/context.js';
+import type { LayerCategory, PaletteColor, WardrobeItem } from '../types/wardrobe.js';
 
 export type RequiredLayer = 'top' | 'bottom' | 'shoes';
 export type OptionalLayer = 'outerwear';
@@ -44,14 +44,6 @@ export interface ValidationResult {
 export interface AssembleOptions {
   excludedItemIds?: string[];
   lockedLayerIds?: Partial<Record<OutfitLayer, string | undefined>>;
-}
-
-export interface EngineResult extends OutfitRecommendation {
-  meta: {
-    context: DailyContext;
-    carry: CarryItem[];
-    selectedColors: PaletteColor[];
-  };
 }
 
 export type LayerBuckets = Record<LayerCategory, WardrobeItem[]>;
