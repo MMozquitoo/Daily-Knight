@@ -13,7 +13,7 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
-import { uploadImage } from '../services/drive.js';
+import { WebClient } from '@slack/web-api';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
@@ -125,14 +125,25 @@ async function downloadSlackFile(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-function findImageFile(files: any[]): { mimetype: string; url_private_download?: string; permalink?: string } | undefined {
+function findImageFile(files: any[]): { id: string; mimetype: string; url_private_download?: string; permalink?: string } | undefined {
   return files.find(
     (f: any) => f.mimetype && IMAGE_MIME_TYPES.includes(f.mimetype),
   );
 }
 
+const slackWeb = new WebClient(process.env.SLACK_BOT_TOKEN);
+
+async function makeFilePublic(fileId: string): Promise<string | undefined> {
+  try {
+    const res = await slackWeb.files.sharedPublicURL({ file: fileId });
+    return (res.file as any)?.permalink_public;
+  } catch {
+    return undefined;
+  }
+}
+
 async function handleImageMessage(
-  imageFile: { mimetype: string; url_private_download?: string; permalink?: string },
+  imageFile: { id: string; mimetype: string; url_private_download?: string; permalink?: string },
   userText: string | undefined,
   say: (msg: any) => Promise<any>,
 ): Promise<void> {
@@ -140,28 +151,28 @@ async function handleImageMessage(
     await say(':x: Je ne peux pas accéder à la photo. Vérifie que le bot a le scope `files:read`.');
     return;
   }
+
+  // Database-level dedup: skip if an item with this file ID already exists
+  const existing = await sheets.getAll();
+  if (existing.some(i => i.imageUrl?.includes(imageFile.id))) return;
+
   await say(':hourglass_flowing_sand: J\'analyse la photo...');
   const buffer = await downloadSlackFile(imageFile.url_private_download);
-
-  // Database-level dedup: skip if an item with this Slack permalink already exists
-  if (imageFile.permalink) {
-    const existing = await sheets.getAll();
-    if (existing.some(i => i.imageUrl?.includes(imageFile.permalink!.split('/').pop()!))) return;
-  }
 
   const resized = await sharp(buffer)
     .resize(1568, 1568, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 85 })
     .toBuffer();
   const base64 = resized.toString('base64');
-  const [parsed, driveUrl] = await Promise.all([
+  const [parsed, publicUrl] = await Promise.all([
     parseAddItemFromImage(base64, 'image/jpeg', userText || undefined),
-    uploadImage(buffer, `${Date.now()}.${imageFile.mimetype.split('/')[1] || 'jpg'}`, imageFile.mimetype),
+    makeFilePublic(imageFile.id),
   ]);
   if (!parsed.categorie) {
     await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
     return;
   }
+  const imageUrl = publicUrl || imageFile.permalink;
   const generatedId = await sheets.generateId(parsed.categorie);
   const item: ClothingItem = {
     id: generatedId,
@@ -179,7 +190,7 @@ async function handleImageMessage(
     impact: parsed.impact ?? 3,
     polyvalence: parsed.polyvalence ?? 3,
     etat: parsed.etat ?? 'neuf',
-    imageUrl: driveUrl,
+    imageUrl,
   };
   await sheets.append(item);
   await say({ blocks: savedItemMessage(item) as any });
