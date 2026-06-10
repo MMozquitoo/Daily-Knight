@@ -112,6 +112,9 @@ async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
+// Dedup: track processed event timestamps to prevent duplicate processing
+const processedEvents = new Set<string>();
+
 async function downloadSlackFile(url: string): Promise<Buffer> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
@@ -134,6 +137,11 @@ async function handleImageMessage(
   if (!imageFile.url_private_download) {
     await say(':x: Je ne peux pas accéder à la photo. Vérifie que le bot a le scope `files:read`.');
     return;
+  }
+  // Database-level dedup: skip if an item with this image URL already exists
+  if (imageFile.permalink) {
+    const existing = await sheets.getAll();
+    if (existing.some(i => i.imageUrl === imageFile.permalink)) return;
   }
   await say(':hourglass_flowing_sand: J\'analyse la photo...');
   const buffer = await downloadSlackFile(imageFile.url_private_download);
@@ -177,6 +185,12 @@ const HELP_PATTERN = /aide|help|ayuda|commandes?|commands?|que\s+(sais|peux|pued
 app.event('message', async ({ event, say }) => {
   const msg = event as any;
   if (msg.subtype !== 'file_share') return;
+  if (msg.bot_id) return;
+
+  // In-memory dedup: skip if this event timestamp was already processed
+  const eventKey = msg.event_ts || msg.ts;
+  if (processedEvents.has(eventKey)) return;
+  processedEvents.add(eventKey);
 
   const files = msg.files ?? [];
   const imageFile = findImageFile(files);
