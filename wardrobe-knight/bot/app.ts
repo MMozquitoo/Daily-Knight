@@ -13,6 +13,7 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
+import { uploadImage } from '../services/drive.js';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
@@ -138,15 +139,20 @@ async function handleImageMessage(
     await say(':x: Je ne peux pas accéder à la photo. Vérifie que le bot a le scope `files:read`.');
     return;
   }
-  // Database-level dedup: skip if an item with this image URL already exists
-  if (imageFile.permalink) {
-    const existing = await sheets.getAll();
-    if (existing.some(i => i.imageUrl === imageFile.permalink)) return;
-  }
   await say(':hourglass_flowing_sand: J\'analyse la photo...');
   const buffer = await downloadSlackFile(imageFile.url_private_download);
+
+  // Database-level dedup: skip if an item with this Slack permalink already exists
+  if (imageFile.permalink) {
+    const existing = await sheets.getAll();
+    if (existing.some(i => i.imageUrl?.includes(imageFile.permalink!.split('/').pop()!))) return;
+  }
+
   const base64 = buffer.toString('base64');
-  const parsed = await parseAddItemFromImage(base64, imageFile.mimetype, userText || undefined);
+  const [parsed, driveUrl] = await Promise.all([
+    parseAddItemFromImage(base64, imageFile.mimetype, userText || undefined),
+    uploadImage(buffer, `${Date.now()}.${imageFile.mimetype.split('/')[1] || 'jpg'}`, imageFile.mimetype),
+  ]);
   if (!parsed.categorie) {
     await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
     return;
@@ -168,7 +174,7 @@ async function handleImageMessage(
     impact: parsed.impact ?? 3,
     polyvalence: parsed.polyvalence ?? 3,
     etat: parsed.etat ?? 'neuf',
-    imageUrl: imageFile.permalink,
+    imageUrl: driveUrl,
   };
   await sheets.append(item);
   await say({ blocks: savedItemMessage(item) as any });
