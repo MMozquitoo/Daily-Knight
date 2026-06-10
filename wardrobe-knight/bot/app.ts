@@ -120,6 +120,34 @@ async function downloadSlackFile(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
+function findImageFile(files: any[]): { mimetype: string; url_private_download?: string; permalink?: string } | undefined {
+  return files.find(
+    (f: any) => f.mimetype && IMAGE_MIME_TYPES.includes(f.mimetype),
+  );
+}
+
+async function handleImageMessage(
+  imageFile: { mimetype: string; url_private_download?: string; permalink?: string },
+  userText: string | undefined,
+  say: (msg: any) => Promise<any>,
+): Promise<void> {
+  if (!imageFile.url_private_download) {
+    await say(':x: Je ne peux pas accéder à la photo. Vérifie que le bot a le scope `files:read`.');
+    return;
+  }
+  await say(':hourglass_flowing_sand: J\'analyse la photo...');
+  const buffer = await downloadSlackFile(imageFile.url_private_download);
+  const base64 = buffer.toString('base64');
+  const parsed = await parseAddItemFromImage(base64, imageFile.mimetype, userText || undefined);
+  if (!parsed.categorie) {
+    await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
+    return;
+  }
+  const generatedId = await sheets.generateId(parsed.categorie);
+  const imageUrl = imageFile.permalink;
+  await say({ blocks: confirmAddItem(parsed, generatedId, imageUrl) as any });
+}
+
 const OUTFIT_PATTERN = /je\s+mets?\s+quoi|quoi\s+porter|outfit|qu[ée]\s+me\s+pongo|tenue/i;
 const GREETING_PATTERN = /^(bonjour|salut|hello|hey|hi|coucou|bonsoir)\b/i;
 const ARMOIRE_PATTERN = /armoire|armario|wardrobe|garde-?robe|voir.*vêtements|mes\s+vêtements/i;
@@ -127,26 +155,31 @@ const AGENDA_PATTERN = /agenda|calendrier|calendar|réunion|événements|eventos
 const METEO_PATTERN = /météo|meteo|weather|temps\s+qu'il\s+fait|clima/i;
 const HELP_PATTERN = /aide|help|ayuda|commandes?|commands?|que\s+(sais|peux|puedes)/i;
 
-app.message(async ({ message, say }) => {
-  const files = 'files' in message ? (message.files ?? []) : [];
-  const imageFile = files.find(
-    (f: any) => f.mimetype && IMAGE_MIME_TYPES.includes(f.mimetype),
-  ) as { mimetype: string; url_private_download?: string; permalink?: string } | undefined;
+// Handle file_share subtype (Slack sends photos as messages with this subtype)
+app.event('message', async ({ event, say }) => {
+  const msg = event as any;
+  if (msg.subtype !== 'file_share') return;
 
-  if (imageFile?.url_private_download) {
+  const files = msg.files ?? [];
+  const imageFile = findImageFile(files);
+  if (!imageFile) return;
+
+  try {
+    const userText = msg.text || undefined;
+    await handleImageMessage(imageFile, userText, say);
+  } catch (err) {
+    await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+  }
+});
+
+app.message(async ({ message, say }) => {
+  // Check for images in regular messages (non-file_share subtype)
+  const files = 'files' in message ? (message.files ?? []) : [];
+  const imageFile = findImageFile(files);
+  if (imageFile) {
     try {
-      await say(':hourglass_flowing_sand: J\'analyse la photo...');
-      const buffer = await downloadSlackFile(imageFile.url_private_download);
-      const base64 = buffer.toString('base64');
       const userText = 'text' in message ? (message.text ?? '') : '';
-      const parsed = await parseAddItemFromImage(base64, imageFile.mimetype, userText || undefined);
-      if (!parsed.categorie) {
-        await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
-        return;
-      }
-      const generatedId = await sheets.generateId(parsed.categorie);
-      const imageUrl = imageFile.permalink;
-      await say({ blocks: confirmAddItem(parsed, generatedId, imageUrl) as any });
+      await handleImageMessage(imageFile, userText, say);
     } catch (err) {
       await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
