@@ -13,7 +13,6 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
-import { WebClient } from '@slack/web-api';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
@@ -131,15 +130,14 @@ function findImageFile(files: any[]): { id: string; mimetype: string; url_privat
   );
 }
 
-const slackWeb = new WebClient(process.env.SLACK_BOT_TOKEN);
+const VERCEL_BASE = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : 'https://daily-knight.vercel.app';
 
-async function makeFilePublic(fileId: string): Promise<string | undefined> {
-  try {
-    const res = await slackWeb.files.sharedPublicURL({ file: fileId });
-    return (res.file as any)?.permalink_public;
-  } catch {
-    return undefined;
-  }
+function buildImageProxyUrl(slackPrivateUrl: string): string {
+  return `${VERCEL_BASE}/api/images?url=${encodeURIComponent(slackPrivateUrl)}`;
 }
 
 async function handleImageMessage(
@@ -164,15 +162,12 @@ async function handleImageMessage(
     .jpeg({ quality: 85 })
     .toBuffer();
   const base64 = resized.toString('base64');
-  const [parsed, publicUrl] = await Promise.all([
-    parseAddItemFromImage(base64, 'image/jpeg', userText || undefined),
-    makeFilePublic(imageFile.id),
-  ]);
+  const parsed = await parseAddItemFromImage(base64, 'image/jpeg', userText || undefined);
   if (!parsed.categorie) {
     await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
     return;
   }
-  const imageUrl = publicUrl || imageFile.permalink;
+  const imageUrl = buildImageProxyUrl(imageFile.url_private_download);
   const generatedId = await sheets.generateId(parsed.categorie);
   const item: ClothingItem = {
     id: generatedId,
