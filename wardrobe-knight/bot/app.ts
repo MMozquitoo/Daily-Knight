@@ -191,19 +191,6 @@ app.event('message', async ({ event, say }) => {
 });
 
 app.message(async ({ message, say }) => {
-  // Check for images in regular messages (non-file_share subtype)
-  const files = 'files' in message ? (message.files ?? []) : [];
-  const imageFile = findImageFile(files);
-  if (imageFile) {
-    try {
-      const userText = 'text' in message ? (message.text ?? '') : '';
-      await handleImageMessage(imageFile, userText, say);
-    } catch (err) {
-      await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-    }
-    return;
-  }
-
   if (message.type !== 'message' || !('text' in message) || !message.text) return;
 
   const text = message.text;
