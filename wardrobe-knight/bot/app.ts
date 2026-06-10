@@ -14,6 +14,7 @@ import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/w
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
 import { uploadImage } from '../services/drive.js';
+import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
@@ -148,9 +149,13 @@ async function handleImageMessage(
     if (existing.some(i => i.imageUrl?.includes(imageFile.permalink!.split('/').pop()!))) return;
   }
 
-  const base64 = buffer.toString('base64');
+  const resized = await sharp(buffer)
+    .resize(1568, 1568, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  const base64 = resized.toString('base64');
   const [parsed, driveUrl] = await Promise.all([
-    parseAddItemFromImage(base64, imageFile.mimetype, userText || undefined),
+    parseAddItemFromImage(base64, 'image/jpeg', userText || undefined),
     uploadImage(buffer, `${Date.now()}.${imageFile.mimetype.split('/')[1] || 'jpg'}`, imageFile.mimetype),
   ]);
   if (!parsed.categorie) {
