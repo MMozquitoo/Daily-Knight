@@ -13,7 +13,7 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
-import { outfitMessage, confirmAddItem, wardrobeList } from './blocks.js';
+import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
 import type { OutfitRecommendation } from '../types/outfit.js';
@@ -144,8 +144,26 @@ async function handleImageMessage(
     return;
   }
   const generatedId = await sheets.generateId(parsed.categorie);
-  const imageUrl = imageFile.permalink;
-  await say({ blocks: confirmAddItem(parsed, generatedId, imageUrl) as any });
+  const item: ClothingItem = {
+    id: generatedId,
+    categorie: parsed.categorie ?? '',
+    sousCategorie: parsed.sousCategorie ?? '',
+    marque: parsed.marque ?? '',
+    modele: parsed.modele ?? '',
+    couleur: parsed.couleur ?? 'gris',
+    palette: parsed.palette ?? 'neutre',
+    matiere: parsed.matiere ?? '',
+    coupe: parsed.coupe ?? '',
+    niveau: parsed.niveau ?? 'casual',
+    saison: parsed.saison ?? 'toutes',
+    formalite: parsed.formalite ?? 3,
+    impact: parsed.impact ?? 3,
+    polyvalence: parsed.polyvalence ?? 3,
+    etat: parsed.etat ?? 'neuf',
+    imageUrl: imageFile.permalink,
+  };
+  await sheets.append(item);
+  await say({ blocks: savedItemMessage(item) as any });
 }
 
 const OUTFIT_PATTERN = /je\s+mets?\s+quoi|quoi\s+porter|outfit|qu[ée]\s+me\s+pongo|tenue/i;
@@ -207,7 +225,25 @@ app.message(async ({ message, say }) => {
         return;
       }
       const generatedId = await sheets.generateId(parsed.categorie);
-      await say({ blocks: confirmAddItem(parsed, generatedId) as any });
+      const item: ClothingItem = {
+        id: generatedId,
+        categorie: parsed.categorie ?? '',
+        sousCategorie: parsed.sousCategorie ?? '',
+        marque: parsed.marque ?? '',
+        modele: parsed.modele ?? '',
+        couleur: parsed.couleur ?? 'gris',
+        palette: parsed.palette ?? 'neutre',
+        matiere: parsed.matiere ?? '',
+        coupe: parsed.coupe ?? '',
+        niveau: parsed.niveau ?? 'casual',
+        saison: parsed.saison ?? 'toutes',
+        formalite: parsed.formalite ?? 3,
+        impact: parsed.impact ?? 3,
+        polyvalence: parsed.polyvalence ?? 3,
+        etat: parsed.etat ?? 'neuf',
+      };
+      await sheets.append(item);
+      await say({ blocks: savedItemMessage(item) as any });
     } catch (err) {
       await say(`:x: Erreur d'interprétation : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
@@ -317,43 +353,55 @@ app.action('view_agenda', async ({ ack, respond }) => {
   }
 });
 
-app.action('confirm_add_item', async ({ ack, action, respond }) => {
+app.action('edit_item', async ({ ack, action, body, client }) => {
   await ack();
   try {
-    const payload = 'value' in action ? JSON.parse(action.value as string) : {};
-    const item: ClothingItem = {
-      id: payload.id,
-      categorie: payload.categorie ?? '',
-      sousCategorie: payload.sousCategorie ?? '',
-      marque: payload.marque ?? '',
-      modele: payload.modele ?? '',
-      couleur: payload.couleur ?? 'gris',
-      palette: payload.palette ?? 'neutre',
-      matiere: payload.matiere ?? '',
-      coupe: payload.coupe ?? '',
-      niveau: payload.niveau ?? 'casual',
-      saison: payload.saison ?? 'toutes',
-      formalite: payload.formalite ?? 3,
-      impact: payload.impact ?? 3,
-      polyvalence: payload.polyvalence ?? 3,
-      etat: payload.etat ?? 'neuf',
-      imageUrl: payload.imageUrl ?? undefined,
-    };
-
-    await sheets.append(item);
-    const name = `${item.categorie} ${item.sousCategorie}`.trim();
-    await respond({
-      replace_original: true,
-      text: `:white_check_mark: *${name}* (${item.id}) enregistré dans ton armoire.`,
+    const itemId = 'value' in action ? (action.value as string) : '';
+    const item = await sheets.getById(itemId);
+    if (!item) return;
+    await client.views.open({
+      trigger_id: (body as any).trigger_id,
+      view: editItemModal(item) as any,
     });
   } catch (err) {
-    await respond(`:x: Erreur lors de l'enregistrement : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    console.error('[EDIT_ITEM]', err);
   }
 });
 
-app.action('cancel_add_item', async ({ ack, respond }) => {
+app.view('edit_item_modal', async ({ ack, view, body, client }) => {
   await ack();
-  await respond({ replace_original: true, text: ':x: Annulé. Le vêtement n\'a pas été enregistré.' });
+  try {
+    const itemId = view.private_metadata;
+    const v = view.state.values;
+    const text = (blockId: string) => v[blockId]?.[blockId]?.value ?? '';
+    const select = (blockId: string) => v[blockId]?.[blockId]?.selected_option?.value ?? '';
+
+    const fields: Partial<ClothingItem> = {
+      categorie: text('categorie'),
+      sousCategorie: text('sousCategorie'),
+      marque: text('marque'),
+      modele: text('modele'),
+      couleur: text('couleur'),
+      palette: (select('palette') || 'neutre') as ClothingItem['palette'],
+      matiere: text('matiere'),
+      coupe: text('coupe'),
+      niveau: select('niveau') || 'casual',
+      saison: select('saison') || 'toutes',
+      formalite: parseInt(text('formalite') || '3', 10) || 3,
+      impact: parseInt(text('impact') || '3', 10) || 3,
+      polyvalence: parseInt(text('polyvalence') || '3', 10) || 3,
+      etat: (select('etat') || 'neuf') as ClothingItem['etat'],
+    };
+
+    await sheets.update(itemId, fields);
+    const name = `${fields.categorie} ${fields.sousCategorie}`.trim();
+    await client.chat.postMessage({
+      channel: (body as any).user.id,
+      text: `:white_check_mark: *${name}* (${itemId}) mis à jour.`,
+    });
+  } catch (err) {
+    console.error('[EDIT_MODAL]', err);
+  }
 });
 
 app.error(async (error) => {

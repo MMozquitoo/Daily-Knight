@@ -139,7 +139,7 @@ export async function update(id: string, fields: Partial<ClothingItem>): Promise
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${rowNumber}:O${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:P${rowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [itemToRow(updated)],

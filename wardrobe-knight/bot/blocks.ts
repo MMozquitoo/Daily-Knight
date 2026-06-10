@@ -94,36 +94,32 @@ export function outfitMessage(
   return blocks;
 }
 
-export function confirmAddItem(
-  parsed: Partial<ClothingItem>,
-  generatedId: string,
-  imageUrl?: string,
-): object[] {
+export function savedItemMessage(item: ClothingItem): object[] {
   const fields = [
-    `*ID :* ${generatedId}`,
-    `*Catégorie :* ${parsed.categorie ?? '_à compléter_'}`,
-    `*Sous-catégorie :* ${parsed.sousCategorie ?? '_–_'}`,
-    `*Marque :* ${parsed.marque ?? '_–_'}`,
-    `*Modèle :* ${parsed.modele ?? '_–_'}`,
-    `*Couleur :* ${parsed.couleur ?? '_à compléter_'}`,
-    `*Palette :* ${parsed.palette ?? '_–_'}`,
-    `*Matière :* ${parsed.matiere ?? '_–_'}`,
-    `*Coupe :* ${parsed.coupe ?? '_–_'}`,
-    `*Niveau :* ${parsed.niveau ?? '_à compléter_'}`,
-    `*Saison :* ${parsed.saison ?? 'toutes'}`,
-    `*Formalité :* ${parsed.formalite ?? '_à compléter_'}`,
-    `*Impact :* ${parsed.impact ?? '3'}`,
-    `*Polyvalence :* ${parsed.polyvalence ?? '3'}`,
-    `*État :* ${parsed.etat ?? 'neuf'}`,
+    `*ID :* ${item.id}`,
+    `*Catégorie :* ${item.categorie || '_–_'}`,
+    `*Sous-catégorie :* ${item.sousCategorie || '_–_'}`,
+    `*Marque :* ${item.marque || '_–_'}`,
+    `*Modèle :* ${item.modele || '_–_'}`,
+    `*Couleur :* ${item.couleur || '_–_'}`,
+    `*Palette :* ${item.palette || '_–_'}`,
+    `*Matière :* ${item.matiere || '_–_'}`,
+    `*Coupe :* ${item.coupe || '_–_'}`,
+    `*Niveau :* ${item.niveau || '_–_'}`,
+    `*Saison :* ${item.saison || 'toutes'}`,
+    `*Formalité :* ${item.formalite}`,
+    `*Impact :* ${item.impact}`,
+    `*Polyvalence :* ${item.polyvalence}`,
+    `*État :* ${item.etat || 'neuf'}`,
   ];
 
   const blocks: object[] = [];
 
-  if (imageUrl) {
+  if (item.imageUrl) {
     blocks.push({
       type: 'image',
-      image_url: imageUrl,
-      alt_text: `Photo: ${parsed.categorie ?? 'vêtement'}`,
+      image_url: item.imageUrl,
+      alt_text: `Photo: ${item.categorie ?? 'vêtement'}`,
     });
   }
 
@@ -132,7 +128,7 @@ export function confirmAddItem(
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:camera_with_flash: *Nouveau vêtement détecté :*\n\n` + fields.join('\n'),
+        text: `:white_check_mark: *Enregistré dans ton armoire :*\n\n` + fields.join('\n'),
       },
     },
     {
@@ -140,22 +136,67 @@ export function confirmAddItem(
       elements: [
         {
           type: 'button',
-          text: { type: 'plain_text', text: 'Confirmer', emoji: true },
-          style: 'primary',
-          action_id: 'confirm_add_item',
-          value: JSON.stringify({ ...parsed, id: generatedId, imageUrl }),
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: 'Annuler', emoji: true },
-          style: 'danger',
-          action_id: 'cancel_add_item',
+          text: { type: 'plain_text', text: ':pencil2: Modifier', emoji: true },
+          action_id: 'edit_item',
+          value: item.id,
         },
       ],
     },
   );
 
   return blocks;
+}
+
+export function editItemModal(item: ClothingItem): object {
+  const textInput = (label: string, actionId: string, initial: string) => ({
+    type: 'input',
+    block_id: actionId,
+    optional: true,
+    element: {
+      type: 'plain_text_input',
+      action_id: actionId,
+      initial_value: initial || '',
+    },
+    label: { type: 'plain_text', text: label },
+  });
+
+  const selectInput = (label: string, actionId: string, options: string[], initial: string) => ({
+    type: 'input',
+    block_id: actionId,
+    optional: true,
+    element: {
+      type: 'static_select',
+      action_id: actionId,
+      options: options.map((o) => ({ text: { type: 'plain_text', text: o }, value: o })),
+      ...(initial && options.includes(initial) ? { initial_option: { text: { type: 'plain_text', text: initial }, value: initial } } : {}),
+    },
+    label: { type: 'plain_text', text: label },
+  });
+
+  return {
+    type: 'modal',
+    callback_id: 'edit_item_modal',
+    private_metadata: item.id,
+    title: { type: 'plain_text', text: `Modifier ${item.id}` },
+    submit: { type: 'plain_text', text: 'Enregistrer' },
+    close: { type: 'plain_text', text: 'Annuler' },
+    blocks: [
+      textInput('Catégorie', 'categorie', item.categorie),
+      textInput('Sous-catégorie', 'sousCategorie', item.sousCategorie),
+      textInput('Marque', 'marque', item.marque),
+      textInput('Modèle', 'modele', item.modele),
+      textInput('Couleur', 'couleur', item.couleur),
+      selectInput('Palette', 'palette', ['chaud', 'froid', 'neutre'], item.palette),
+      textInput('Matière', 'matiere', item.matiere),
+      textInput('Coupe', 'coupe', item.coupe),
+      selectInput('Niveau', 'niveau', ['casual', 'smart-casual', 'habillé'], item.niveau),
+      selectInput('Saison', 'saison', ['toutes', 'été', 'hiver', 'mi-saison'], item.saison),
+      textInput('Formalité (1-5)', 'formalite', item.formalite.toString()),
+      textInput('Impact (1-5)', 'impact', item.impact.toString()),
+      textInput('Polyvalence (1-5)', 'polyvalence', item.polyvalence.toString()),
+      selectInput('État', 'etat', ['neuf', 'bon', 'usé'], item.etat),
+    ],
+  };
 }
 
 export function wardrobeList(items: ClothingItem[]): object[] {
