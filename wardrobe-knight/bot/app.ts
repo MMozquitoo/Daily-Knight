@@ -20,14 +20,14 @@ import type { OutfitRecommendation } from '../types/outfit.js';
 
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET ?? '',
-  processBeforeResponse: false,
+  processBeforeResponse: true,
   endpoints: '/api/slack/events',
 });
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver,
-  processBeforeResponse: false,
+  processBeforeResponse: true,
 });
 
 // --- State cache (per-instance, regeneration needs previous outfit) ---
