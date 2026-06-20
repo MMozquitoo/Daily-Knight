@@ -6,7 +6,6 @@ import type { AgendaSummary } from '../types/agenda.js';
 import * as sheets from './sheets.js';
 import * as memory from './memory.js';
 import { getPlannedOutfit } from './planner.js';
-import { generateTryOn } from './tryon.js';
 
 let client: Anthropic | null = null;
 
@@ -237,10 +236,6 @@ const TOOLS: Anthropic.Tool[] = [
           type: 'string',
           description: 'Date au format YYYY-MM-DD. Utilise la date d\'aujourd\'hui + 1 pour "demain", etc.',
         },
-        generate_tryon: {
-          type: 'boolean',
-          description: 'Si true, génère une image try-on du haut. Défaut: true.',
-        },
       },
       required: ['date'],
     },
@@ -310,16 +305,12 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
         `Raison : ${planned.why}`,
       ].filter(Boolean);
 
-      // Generate try-on if requested
-      if (input.generate_tryon !== false && planned.top) {
-        const topItem = allItems.find((i) => i.id === planned.top);
-        if (topItem?.imageUrl) {
-          try {
-            const tryonUrl = await generateTryOn(topItem);
-            if (tryonUrl) {
-              lines.push('', `Image try-on : ${tryonUrl}`);
-            }
-          } catch { /* skip if try-on fails */ }
+      // Show saved try-on images (pre-generated, no API cost)
+      for (const id of [planned.top, planned.bottom, planned.shoes, planned.outerwear]) {
+        if (!id) continue;
+        const item = allItems.find((i) => i.id === id);
+        if (item?.tryonUrl) {
+          lines.push(`Image try-on ${item.id} : ${item.tryonUrl}`);
         }
       }
 

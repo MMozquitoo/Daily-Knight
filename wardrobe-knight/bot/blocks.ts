@@ -46,6 +46,16 @@ export function outfitMessage(
     ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
     : '_Rien de plus_';
 
+  // Collect try-on images for the outfit
+  const tryonImages: { url: string; alt: string }[] = [];
+  for (const id of [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes, recommendation.wear.outerwear]) {
+    if (!id) continue;
+    const item = itemMap.get(id);
+    if (item?.tryonUrl) {
+      tryonImages.push({ url: item.tryonUrl, alt: `Try-on: ${itemDisplayName(item)}` });
+    }
+  }
+
   const blocks: object[] = [
     {
       type: 'header',
@@ -68,6 +78,11 @@ export function outfitMessage(
       type: 'section',
       text: { type: 'mrkdwn', text: `*POURQUOI*\n_${recommendation.why}_` },
     },
+    ...tryonImages.map((img) => ({
+      type: 'image',
+      image_url: img.url,
+      alt_text: img.alt,
+    })),
     { type: 'divider' },
     {
       type: 'actions',

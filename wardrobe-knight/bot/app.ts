@@ -148,20 +148,6 @@ async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
     outerwear: recommendation.wear.outerwear,
   });
   await say({ blocks: outfitMessage(recommendation, items, weather) as any });
-
-  // Generate try-on in background for the top item
-  if (recommendation.wear.top && process.env.TRYON_BASE_IMAGE) {
-    const topItem = items.find((i) => i.id === recommendation.wear.top);
-    if (topItem?.imageUrl) {
-      generateTryOn(topItem)
-        .then(async (tryonUrl) => {
-          if (tryonUrl) {
-            await say(`:sparkles: Voici le look sur toi :\n${tryonUrl}`);
-          }
-        })
-        .catch(() => {});
-    }
-  }
 }
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
