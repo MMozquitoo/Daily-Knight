@@ -4,6 +4,7 @@ import { categoryFromSheet } from '../types/wardrobe.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
 import * as sheets from './sheets.js';
+import * as memory from './memory.js';
 
 let client: Anthropic | null = null;
 
@@ -73,7 +74,7 @@ function serializeWardrobe(items: ClothingItem[]): string {
 // System prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `Tu es l'assistant garde-robe de Wardrobe Knight. Tu réponds en français, de façon concise et concrète.
+const SYSTEM_PROMPT = `Tu es l'assistant garde-robe de Wardrobe Knight. Tu réponds en français, de façon concise et concrète. Tu as de la personnalité : tu es un ami styliste, pas un robot.
 
 Tu reçois l'inventaire complet de la garde-robe de l'utilisateur. Chaque ligne est un vêtement :
 ID | [layer] | catégorie | sous-catégorie | couleur | marque | matière | formalité | polyvalence | saison | état
@@ -88,13 +89,34 @@ Règles pour bien répondre :
 - "Qu'est-ce que je peux jeter" → priorise état "usé", faible polyvalence, puis doublons.
 - "Quel accessoire va avec X" → harmonie de couleur et cohérence de formalité (±1 niveau).
 
-Tu as accès à des outils pour MODIFIER la garde-robe et consulter l'historique. Utilise-les quand l'utilisateur le demande.
-- Pour mettre à jour un item : utilise update_item.
-- Pour supprimer un item : utilise delete_item — TOUJOURS demander confirmation avant de supprimer.
-- Pour chercher un item par ID : utilise get_item.
-- Pour voir ce qui a été porté récemment : utilise get_worn_history. Les vêtements portés hier sont automatiquement bloqués (cooldown de 3 jours).
+OUTILS GARDE-ROBE :
+- update_item : mettre à jour un item.
+- delete_item : supprimer un item — TOUJOURS demander confirmation avant.
+- get_item : chercher un item par ID.
+- get_worn_history : voir l'historique récent. Cooldown de 3 jours automatique.
 
-Réponds en te basant UNIQUEMENT sur l'inventaire fourni. Référence les vêtements par leur ID. Sois bref.`;
+OUTILS MÉMOIRE — Tu as une mémoire persistante entre les conversations :
+- save_memory : Sauvegarde une info importante. Types :
+  • "preference" — marques aimées, styles préférés, couleurs favorites, habitudes
+  • "suggestion" — tu recommandes d'acheter quelque chose (ajoute followUpDate pour rappeler plus tard)
+  • "observation" — pattern de vie (ex: samedi = repos, travaille dans le marketing)
+  • "joke" — blagues internes, réferences humoristiques partagées
+- get_memories : Récupère les souvenirs sauvegardés.
+
+QUAND SAUVEGARDER :
+- L'utilisateur mentionne une marque qu'il aime → save_memory type "preference"
+- L'utilisateur dit quelque chose sur ses habitudes (ex: "le samedi je fais rien") → save_memory type "observation"
+- Tu suggères d'acheter un vêtement manquant → save_memory type "suggestion" + followUpDate dans 4-7 jours
+- Un moment drôle ou une blague → save_memory type "joke"
+- NE PAS sauvegarder des infos triviales ou déjà dans l'inventaire.
+
+QUAND UTILISER LES SOUVENIRS :
+- Personnalise tes recommandations avec les préférences connues (ex: si l'utilisateur aime Nike, suggère Nike).
+- Rappelle les suggestions passées naturellement (ex: "Au fait, tu as pu regarder pour les sneakers blanches ?").
+- Utilise les blagues internes pour créer de la complicité.
+- Les samedis/dimanches, si tu sais que l'utilisateur se repose, adapte le ton (pyjama day, relax, etc.).
+
+Réponds en te basant sur l'inventaire ET tes souvenirs. Référence les vêtements par leur ID. Sois bref mais chaleureux.`;
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -165,13 +187,47 @@ const TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: 'save_memory',
+    description: "Sauvegarde un souvenir persistant. Utilise pour retenir les préférences, suggestions, observations ou blagues de l'utilisateur.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['preference', 'suggestion', 'observation', 'joke'],
+          description: 'Type de souvenir',
+        },
+        content: {
+          type: 'string',
+          description: 'Le contenu du souvenir (ex: "Aime Nike", "Suggéré des sneakers blanches")',
+        },
+        follow_up_date: {
+          type: 'string',
+          description: 'Date de rappel optionnelle au format YYYY-MM-DD. Utile pour les suggestions à rappeler.',
+        },
+      },
+      required: ['type', 'content'],
+    },
+  },
+  {
+    name: 'get_memories',
+    description: "Récupère les souvenirs sauvegardés pour cet utilisateur. Utilise en début de conversation ou quand tu veux personnaliser ta réponse.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'number', description: 'Nombre max de souvenirs (défaut: 50)', minimum: 1, maximum: 100 },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
 
-async function executeTool(name: string, input: Record<string, any>): Promise<string> {
+async function executeTool(name: string, input: Record<string, any>, userId: string): Promise<string> {
   switch (name) {
     case 'get_item': {
       const item = await sheets.getById(input.id);
@@ -194,6 +250,17 @@ async function executeTool(name: string, input: Record<string, any>): Promise<st
       const history = await sheets.getWornRecently(days);
       if (history.length === 0) return `Aucun historique trouvé pour les ${days} derniers jours.`;
       return JSON.stringify(history, null, 2);
+    }
+    case 'save_memory': {
+      await memory.saveMemory(userId, input.type, input.content, input.follow_up_date);
+      return `Souvenir sauvegardé : [${input.type}] ${input.content}`;
+    }
+    case 'get_memories': {
+      const memories = await memory.getMemories(userId, input.limit ?? 50);
+      if (memories.length === 0) return 'Aucun souvenir sauvegardé pour cet utilisateur.';
+      return memories
+        .map((m) => `[${m.date}] (${m.type}) ${m.content}${m.followUpDate ? ` → rappel: ${m.followUpDate}${m.done ? ' (fait)' : ''}` : ''}`)
+        .join('\n');
     }
     default:
       return `Outil inconnu : ${name}`;
@@ -229,6 +296,31 @@ export async function askAdvisor(
     );
   }
 
+  const today = new Date();
+  const dayNames = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+  contextLines.push('', `AUJOURD'HUI : ${dayNames[today.getDay()]} ${today.toISOString().slice(0, 10)}`);
+
+  // Load persistent memories
+  const [savedMemories, pendingFollowUps] = await Promise.all([
+    memory.getMemories(userId).catch(() => []),
+    memory.getPendingFollowUps(userId).catch(() => []),
+  ]);
+
+  if (savedMemories.length > 0) {
+    contextLines.push('', `SOUVENIRS (${savedMemories.length}) :`);
+    for (const m of savedMemories) {
+      contextLines.push(`[${m.date}] (${m.type}) ${m.content}`);
+    }
+  }
+
+  if (pendingFollowUps.length > 0) {
+    contextLines.push('', 'RAPPELS EN ATTENTE :');
+    for (const f of pendingFollowUps) {
+      contextLines.push(`- ${f.content} (suggéré le ${f.date})`);
+    }
+    contextLines.push('→ Mentionne ces rappels naturellement dans ta réponse si pertinent.');
+  }
+
   const systemWithContext = `${SYSTEM_PROMPT}\n\n${contextLines.join('\n')}`;
 
   const history = getHistory(userId);
@@ -256,7 +348,7 @@ export async function askAdvisor(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const toolUse of toolUseBlocks) {
-      const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>);
+      const result = await executeTool(toolUse.name, toolUse.input as Record<string, any>, userId);
       toolResults.push({
         type: 'tool_result',
         tool_use_id: toolUse.id,

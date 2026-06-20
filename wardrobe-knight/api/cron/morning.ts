@@ -4,6 +4,7 @@ import { generateOutfit } from '../../engine/index.js';
 import { buildDailyContext } from '../../engine/context.js';
 import { toWardrobeItems } from '../../types/adapter.js';
 import * as sheets from '../../services/sheets.js';
+import * as memory from '../../services/memory.js';
 import { fetchWeather, getUserLocation } from '../../services/weather.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
 import { outfitMessage } from '../../bot/blocks.js';
@@ -73,6 +74,36 @@ export default async function handler(_req: Request, res: Response): Promise<voi
       text: ':shield: Bonjour ! Voici ta tenue du jour :',
       blocks: outfitMessage(recommendation, items, weather) as any,
     });
+
+    // Check for pending follow-ups and send reminders
+    const followUps = await memory.getPendingFollowUps(SLACK_USER_ID).catch(() => []);
+    if (followUps.length > 0) {
+      const reminders = followUps
+        .map((f) => `• ${f.content} _(suggéré le ${f.date})_`)
+        .join('\n');
+      await slack.chat.postMessage({
+        channel: SLACK_USER_ID,
+        text: `:brain: *Rappels :*\n${reminders}`,
+      });
+      for (const f of followUps) {
+        if (f.rowIndex) await memory.markDone(f.rowIndex);
+      }
+    }
+
+    // Weekend personality: check for observations about weekends
+    const dayOfWeek = new Date().getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      const memories = await memory.getMemories(SLACK_USER_ID).catch(() => []);
+      const weekendObs = memories.find(
+        (m) => m.type === 'observation' && /samedi|dimanche|weekend|repos/i.test(m.content),
+      );
+      if (weekendObs) {
+        await slack.chat.postMessage({
+          channel: SLACK_USER_ID,
+          text: ':couch_and_lamp: Bon weekend ! Journée pyjama autorisée :wink:',
+        });
+      }
+    }
 
     res.status(200).json({ ok: true, date: todayStr() });
   } catch (err) {

@@ -113,9 +113,14 @@ export async function generateId(categorie: string): Promise<string> {
 /** Append a new item to the sheet */
 export async function append(item: ClothingItem): Promise<void> {
   const sheets = getSheets();
-  await sheets.spreadsheets.values.append({
+  const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId(),
-    range: RANGE,
+    range: `${SHEET_NAME}!A:A`,
+  });
+  const nextRow = (res.data.values?.length ?? 1) + 1;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId(),
+    range: `${SHEET_NAME}!A${nextRow}:P${nextRow}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [itemToRow(item)],
