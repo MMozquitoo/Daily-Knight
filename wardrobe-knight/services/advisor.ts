@@ -5,6 +5,8 @@ import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
 import * as sheets from './sheets.js';
 import * as memory from './memory.js';
+import { getPlannedOutfit } from './planner.js';
+import { generateTryOn } from './tryon.js';
 
 let client: Anthropic | null = null;
 
@@ -94,6 +96,10 @@ OUTILS GARDE-ROBE :
 - delete_item : supprimer un item — TOUJOURS demander confirmation avant.
 - get_item : chercher un item par ID.
 - get_worn_history : voir l'historique récent. Cooldown de 3 jours automatique.
+- get_planned_outfit : voir/générer la tenue planifiée pour une date (demain, lundi, etc.). Génère aussi une image try-on !
+  → "demain" = date d'aujourd'hui + 1 jour. Calcule la bonne date YYYY-MM-DD.
+  → Si le plan n'existe pas, dis à l'utilisateur de lancer /outfit pour le jour même.
+  → Montre l'image try-on dans ta réponse si elle est générée.
 
 OUTILS MÉMOIRE — Tu as une mémoire persistante entre les conversations :
 - save_memory : Sauvegarde une info importante. Types :
@@ -221,6 +227,24 @@ const TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: 'get_planned_outfit',
+    description: "Récupère la tenue planifiée pour une date donnée et génère une image try-on si possible. Utilise quand l'utilisateur demande « qu'est-ce que je mets demain ? », « outfit de lundi », etc.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Date au format YYYY-MM-DD. Utilise la date d\'aujourd\'hui + 1 pour "demain", etc.',
+        },
+        generate_tryon: {
+          type: 'boolean',
+          description: 'Si true, génère une image try-on du haut. Défaut: true.',
+        },
+      },
+      required: ['date'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -261,6 +285,45 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
       return memories
         .map((m) => `[${m.date}] (${m.type}) ${m.content}${m.followUpDate ? ` → rappel: ${m.followUpDate}${m.done ? ' (fait)' : ''}` : ''}`)
         .join('\n');
+    }
+    case 'get_planned_outfit': {
+      const planned = await getPlannedOutfit(input.date);
+      if (!planned || !planned.top) {
+        return `Aucune tenue planifiée pour le ${input.date}. Le plan est généré chaque dimanche soir. L'utilisateur peut aussi demander /outfit pour aujourd'hui.`;
+      }
+      const allItems = await sheets.getAll();
+      const itemDetails = (id: string) => {
+        const item = allItems.find((i) => i.id === id);
+        return item ? `${id} — ${item.categorie} ${item.sousCategorie} ${item.couleur}${item.marque ? ` (${item.marque})` : ''}` : id;
+      };
+
+      const lines = [
+        `Tenue planifiée pour ${planned.dayName} ${planned.date} :`,
+        `Météo : ${planned.weatherSummary}`,
+        `Agenda : ${planned.agendaSummary}`,
+        '',
+        `Haut : ${itemDetails(planned.top)}`,
+        planned.bottom ? `Bas : ${itemDetails(planned.bottom)}` : '',
+        planned.shoes ? `Chaussures : ${itemDetails(planned.shoes)}` : '',
+        planned.outerwear ? `Outerwear : ${itemDetails(planned.outerwear)}` : '',
+        planned.carry ? `Accessoires : ${planned.carry}` : '',
+        `Raison : ${planned.why}`,
+      ].filter(Boolean);
+
+      // Generate try-on if requested
+      if (input.generate_tryon !== false && planned.top) {
+        const topItem = allItems.find((i) => i.id === planned.top);
+        if (topItem?.imageUrl) {
+          try {
+            const tryonUrl = await generateTryOn(topItem);
+            if (tryonUrl) {
+              lines.push('', `Image try-on : ${tryonUrl}`);
+            }
+          } catch { /* skip if try-on fails */ }
+        }
+      }
+
+      return lines.join('\n');
     }
     default:
       return `Outil inconnu : ${name}`;
