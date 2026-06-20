@@ -256,6 +256,7 @@ async function handleImageMessage(
   }
 }
 
+const FUTURE_PATTERN = /demain|mañana|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|tomorrow|next|prochain|semaine|week|lunes|martes|miércoles|jueves|viernes|sábado|domingo/i;
 const OUTFIT_PATTERN = /je\s+mets?\s+quoi|quoi\s+porter|outfit|qu[ée]\s+me\s+pongo|tenue/i;
 const GREETING_PATTERN = /^(bonjour|salut|hello|hey|hi|coucou|bonsoir)\b/i;
 const ARMOIRE_PATTERN = /armoire|armario|wardrobe|garde-?robe|voir.*vêtements|mes\s+vêtements/i;
@@ -291,7 +292,7 @@ app.message(async ({ message, say }) => {
 
   const text = message.text;
 
-  if (OUTFIT_PATTERN.test(text)) {
+  if (OUTFIT_PATTERN.test(text) && !FUTURE_PATTERN.test(text)) {
     try {
       await generateAndSendOutfit(say);
     } catch (err) {
