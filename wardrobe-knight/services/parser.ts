@@ -55,7 +55,7 @@ export async function parseAddItem(userMessage: string): Promise<ParsedItem> {
   const anthropic = getClient();
 
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 500,
     messages: [
       {
@@ -117,7 +117,7 @@ export async function parseAddItemFromImage(
     : IMAGE_PROMPT;
 
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 500,
     messages: [
       {

@@ -236,7 +236,7 @@ export async function askAdvisor(
   const messages: Anthropic.MessageParam[] = [...history, userMessage];
 
   let response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1500,
     system: systemWithContext,
     tools: TOOLS,
@@ -268,7 +268,7 @@ export async function askAdvisor(
     messages.push({ role: 'user', content: toolResults });
 
     response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       system: systemWithContext,
       tools: TOOLS,
