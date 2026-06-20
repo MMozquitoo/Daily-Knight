@@ -73,6 +73,16 @@ export async function fetchWeather(lat: number, lon: number): Promise<DayWeather
   };
 }
 
+/** Geocode a city name using Open-Meteo (free, no key) */
+export async function geocodeCity(city: string): Promise<{ lat: number; lon: number; name: string } | null> {
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=fr`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const result = data.results?.[0];
+  if (!result) return null;
+  return { lat: result.latitude, lon: result.longitude, name: result.name };
+}
+
 /** Get location from environment variables */
 export function getUserLocation(): { lat: number; lon: number } {
   return {

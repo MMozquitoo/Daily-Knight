@@ -151,6 +151,87 @@ export async function fetchWeekAgenda(days: number = 7): Promise<Map<string, Age
   return result;
 }
 
+export interface TripInfo {
+  destination: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  events: AgendaEvent[];
+}
+
+/** Detect upcoming trips from calendar events within the next N days */
+export async function detectTrips(daysAhead: number = 14): Promise<TripInfo[]> {
+  const calendarId = process.env.GOOGLE_CALENDAR_ID ?? 'primary';
+  const calendar = google.calendar({ version: 'v3', auth: getAuth() });
+
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfRange = new Date(startOfDay.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+  const res = await calendar.events.list({
+    calendarId,
+    timeMin: startOfDay.toISOString(),
+    timeMax: endOfRange.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+
+  const travelWords = ['vol', 'flight', 'voyage', 'trip', 'travel', 'train', 'avion', 'aéroport', 'airport', 'gare', 'déplacement'];
+  const travelEvents: AgendaEvent[] = [];
+
+  for (const e of res.data.items ?? []) {
+    if (!e.summary) continue;
+    const lower = e.summary.toLowerCase();
+    if (travelWords.some((w) => lower.includes(w)) || e.eventType === 'outOfOffice') {
+      const startTime = e.start?.dateTime || e.start?.date || '';
+      const endTime = e.end?.dateTime || e.end?.date || '';
+      travelEvents.push({
+        id: e.id ?? '',
+        title: e.summary ?? '',
+        startTime,
+        endTime,
+        tag: 'travel',
+      });
+    }
+  }
+
+  if (travelEvents.length === 0) return [];
+
+  // Extract destination from event titles (look for city names after common prepositions)
+  const destPattern = /(?:à|a|vers|pour|to|->|→|–|@)\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]+)*)/;
+  const trips: TripInfo[] = [];
+
+  for (const event of travelEvents) {
+    const match = event.title.match(destPattern);
+    const destination = match?.[1] ?? '';
+    if (!destination) continue;
+
+    const startDate = event.startTime.slice(0, 10);
+    const endDate = event.endTime.slice(0, 10);
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+
+    // Find all events during the trip period
+    const tripEvents = (res.data.items ?? [])
+      .filter((e) => {
+        const eStart = (e.start?.dateTime || e.start?.date || '').slice(0, 10);
+        return eStart >= startDate && eStart <= endDate && e.summary;
+      })
+      .map((e) => ({
+        id: e.id ?? '',
+        title: e.summary ?? '',
+        startTime: e.start?.dateTime || e.start?.date || '',
+        endTime: e.end?.dateTime || e.end?.date || '',
+        tag: classifyEvent(e.summary ?? ''),
+      }));
+
+    trips.push({ destination, startDate, endDate, days, events: tripEvents });
+  }
+
+  return trips;
+}
+
 /** Format agenda for Slack display */
 export function formatAgendaSlack(agenda: AgendaSummary): string {
   if (agenda.events.length === 0) {
