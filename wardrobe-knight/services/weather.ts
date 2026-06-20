@@ -18,6 +18,33 @@ function weatherCodeToCondition(code: number): WeatherCondition {
   return 'cloudy';
 }
 
+export async function fetchWeatherForecast(lat: number, lon: number, days: number = 7): Promise<DayWeather[]> {
+  const params = new URLSearchParams({
+    latitude: lat.toString(),
+    longitude: lon.toString(),
+    daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,wind_speed_10m_max',
+    timezone: 'auto',
+    forecast_days: days.toString(),
+  });
+
+  const res = await fetch(`${BASE_URL}?${params}`);
+  if (!res.ok) throw new Error(`Weather API error: ${res.status}`);
+
+  const data = await res.json();
+  const daily = data.daily;
+
+  return Array.from({ length: days }, (_, i) => ({
+    temperature: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
+    feelsLike: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
+    rainProbability: daily.precipitation_probability_max[i] ?? 0,
+    condition: weatherCodeToCondition(daily.weather_code[i]),
+    wind: Math.round(daily.wind_speed_10m_max[i] ?? 0),
+    tempMax: Math.round(daily.temperature_2m_max[i]),
+    tempMin: Math.round(daily.temperature_2m_min[i]),
+    date: daily.time[i],
+  }));
+}
+
 export async function fetchWeather(lat: number, lon: number): Promise<DayWeather> {
   const params = new URLSearchParams({
     latitude: lat.toString(),

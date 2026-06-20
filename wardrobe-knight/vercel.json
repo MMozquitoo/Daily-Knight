@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/morning",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/plan-week",
+      "schedule": "0 19 * * 0"
     }
   ]
 }

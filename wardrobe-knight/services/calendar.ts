@@ -66,10 +66,19 @@ function deriveDayType(events: AgendaEvent[]): AgendaSummary['dayType'] {
   return 'casual';
 }
 
+/** Build AgendaSummary from a list of events */
+function buildSummary(events: AgendaEvent[]): AgendaSummary {
+  return {
+    events,
+    meetingsCount: events.length,
+    highestFormality: highestTag(events.map((e) => e.tag)),
+    dayType: deriveDayType(events),
+  };
+}
+
 /** Fetch today's events from Google Calendar */
 export async function fetchTodayAgenda(): Promise<AgendaSummary> {
   const calendarId = process.env.GOOGLE_CALENDAR_ID ?? 'primary';
-
   const calendar = google.calendar({ version: 'v3', auth: getAuth() });
 
   const now = new Date();
@@ -94,12 +103,52 @@ export async function fetchTodayAgenda(): Promise<AgendaSummary> {
       tag: classifyEvent(e.summary ?? ''),
     }));
 
-  return {
-    events,
-    meetingsCount: events.length,
-    highestFormality: highestTag(events.map((e) => e.tag)),
-    dayType: deriveDayType(events),
-  };
+  return buildSummary(events);
+}
+
+/** Fetch a week of events, grouped by date (YYYY-MM-DD → AgendaSummary) */
+export async function fetchWeekAgenda(days: number = 7): Promise<Map<string, AgendaSummary>> {
+  const calendarId = process.env.GOOGLE_CALENDAR_ID ?? 'primary';
+  const calendar = google.calendar({ version: 'v3', auth: getAuth() });
+
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfRange = new Date(startOfDay.getTime() + days * 24 * 60 * 60 * 1000);
+
+  const res = await calendar.events.list({
+    calendarId,
+    timeMin: startOfDay.toISOString(),
+    timeMax: endOfRange.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+
+  const byDate = new Map<string, AgendaEvent[]>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(startOfDay.getTime() + i * 24 * 60 * 60 * 1000);
+    byDate.set(d.toISOString().slice(0, 10), []);
+  }
+
+  for (const e of res.data.items ?? []) {
+    if (!e.summary || !e.start?.dateTime) continue;
+    const date = e.start.dateTime.slice(0, 10);
+    const events = byDate.get(date);
+    if (events) {
+      events.push({
+        id: e.id ?? '',
+        title: e.summary ?? '',
+        startTime: e.start.dateTime ?? '',
+        endTime: e.end?.dateTime ?? '',
+        tag: classifyEvent(e.summary ?? ''),
+      });
+    }
+  }
+
+  const result = new Map<string, AgendaSummary>();
+  for (const [date, events] of byDate) {
+    result.set(date, buildSummary(events));
+  }
+  return result;
 }
 
 /** Format agenda for Slack display */

@@ -18,6 +18,7 @@ export interface WeatherData {
 export interface DayWeather extends WeatherData {
   tempMax: number;
   tempMin: number;
+  date?: string;
 }
 
 /** Simplified weather conditions */

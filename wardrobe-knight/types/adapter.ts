@@ -70,14 +70,17 @@ function deriveWeather(item: ClothingItem): { minTemp: number; maxTemp: number; 
   const cat = item.categorie.toLowerCase();
 
   let minTemp = 5;
-  let maxTemp = 30;
+  let maxTemp = 45;
 
   if (saison.includes('hiver') || saison.includes('automne')) {
     minTemp = -5;
-    maxTemp = 18;
+    maxTemp = 20;
   } else if (saison.includes('été')) {
-    minTemp = 18;
-    maxTemp = 40;
+    minTemp = 15;
+    maxTemp = 45;
+  } else if (saison.includes('printemps')) {
+    minTemp = 8;
+    maxTemp = 35;
   }
 
   // Shorts/sandals are warm weather

@@ -5,6 +5,7 @@ import { buildDailyContext } from '../../engine/context.js';
 import { toWardrobeItems } from '../../types/adapter.js';
 import * as sheets from '../../services/sheets.js';
 import * as memory from '../../services/memory.js';
+import { getPlannedOutfit } from '../../services/planner.js';
 import { fetchWeather, getUserLocation } from '../../services/weather.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
 import { outfitMessage } from '../../bot/blocks.js';
@@ -49,6 +50,9 @@ export default async function handler(_req: Request, res: Response): Promise<voi
     const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
     const loc = getUserLocation();
 
+    // Check for pre-planned outfit first
+    const planned = await getPlannedOutfit(todayStr()).catch(() => null);
+
     const [weather, agenda, items, wornHistory] = await Promise.all([
       fetchWeather(loc.lat, loc.lon),
       fetchTodayAgenda(),
@@ -56,11 +60,28 @@ export default async function handler(_req: Request, res: Response): Promise<voi
       sheets.getWornRecently(7),
     ]);
 
-    const wardrobeItems = toWardrobeItems(items);
-    const context = buildDailyContext(weather, agenda);
-    const recentlyWorn = buildCooldownMap(wornHistory);
+    let recommendation;
 
-    const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+    if (planned && planned.top) {
+      // Use pre-planned outfit
+      recommendation = {
+        wear: {
+          top: planned.top,
+          bottom: planned.bottom || '',
+          shoes: planned.shoes || '',
+          outerwear: planned.outerwear || undefined,
+          accessories: [] as string[],
+        },
+        carry: (planned.carry ? planned.carry.split(', ') : []) as any,
+        why: planned.why + ' _(planifié)_',
+      };
+    } else {
+      // Generate on the fly
+      const wardrobeItems = toWardrobeItems(items);
+      const context = buildDailyContext(weather, agenda);
+      const recentlyWorn = buildCooldownMap(wornHistory);
+      recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+    }
 
     await sheets.logWorn(todayStr(), {
       top: recommendation.wear.top,

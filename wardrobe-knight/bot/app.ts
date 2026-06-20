@@ -14,6 +14,7 @@ import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/w
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
 import { askAdvisor } from '../services/advisor.js';
+import { generateTryOn } from '../services/tryon.js';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
@@ -227,6 +228,18 @@ async function handleImageMessage(
   };
   await sheets.append(item);
   await say({ blocks: savedItemMessage(item) as any });
+
+  // Auto-generate try-on in background (don't block the response)
+  if (item.imageUrl && process.env.TRYON_BASE_IMAGE) {
+    generateTryOn(item)
+      .then(async (tryonUrl) => {
+        if (tryonUrl) {
+          await sheets.update(item.id, { tryonUrl } as any);
+          await say(`:sparkles: Try-on généré pour *${item.id}* ! ${tryonUrl}`);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 const OUTFIT_PATTERN = /je\s+mets?\s+quoi|quoi\s+porter|outfit|qu[ée]\s+me\s+pongo|tenue/i;

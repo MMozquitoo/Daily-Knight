@@ -15,7 +15,7 @@ import { CATEGORY_PREFIXES } from '../types/wardrobe.js';
 import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
 
 const SHEET_NAME = 'Armoire';
-const RANGE = `${SHEET_NAME}!A:P`; // 16 columns A–P (P = image URL)
+const RANGE = `${SHEET_NAME}!A:Q`; // 17 columns A–Q (P = image URL, Q = try-on URL)
 const HISTORY_SHEET = 'Historique';
 const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
 
@@ -53,6 +53,7 @@ function rowToItem(row: string[]): ClothingItem {
     polyvalence: parseInt(row[13] ?? '3', 10) || 3,
     etat: (row[14] ?? 'bon') as ClothingItem['etat'],
     imageUrl: row[15] || undefined,
+    tryonUrl: row[16] || undefined,
   };
 }
 
@@ -75,6 +76,7 @@ function itemToRow(item: ClothingItem): string[] {
     item.polyvalence.toString(),
     item.etat,
     item.imageUrl ?? '',
+    item.tryonUrl ?? '',
   ];
 }
 
@@ -146,7 +148,7 @@ export async function update(id: string, fields: Partial<ClothingItem>): Promise
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${rowNumber}:P${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:Q${rowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [itemToRow(updated)],
