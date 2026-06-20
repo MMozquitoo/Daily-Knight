@@ -1,17 +1,32 @@
 import type { Request, Response } from 'express';
 import * as sheets from '../services/sheets.js';
-import { generateTryOn } from '../services/tryon.js';
+import { createTryOnPrediction, waitForPrediction } from '../services/tryon.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
-
-const DELAY_MS = 12_000; // 5 req/min to respect Replicate rate limits
-const BATCH_SIZE = 20; // max per call (~4 min with delays)
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export default async function handler(req: Request, res: Response): Promise<void> {
+async function createWithRetry(item: Parameters<typeof createTryOnPrediction>[0], maxRetries = 3): Promise<string | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await createTryOnPrediction(item);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('429') && attempt < maxRetries) {
+        const match = msg.match(/retry_after.*?(\d+)/);
+        const waitSec = match ? parseInt(match[1]) + 2 : 12;
+        await sleep(waitSec * 1000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  return null;
+}
+
+export default async function handler(_req: Request, res: Response): Promise<void> {
   const items = await sheets.getAll();
   const pending = items.filter((i) => i.imageUrl && !i.tryonUrl);
 
@@ -20,40 +35,58 @@ export default async function handler(req: Request, res: Response): Promise<void
     return;
   }
 
-  const batch = pending.slice(0, BATCH_SIZE);
+  // Process up to 12 items: create sequentially (rate limited), poll in parallel
+  const BATCH = 12;
+  const batch = pending.slice(0, BATCH);
+  const predictions: { predId: string; itemId: string }[] = [];
   const results: { id: string; status: string; tryonUrl?: string }[] = [];
+  const startTime = Date.now();
 
-  for (let i = 0; i < batch.length; i++) {
-    const item = batch[i];
+  // Phase 1: Create predictions one at a time with retry on 429
+  for (const item of batch) {
+    if (Date.now() - startTime > 200_000) break; // leave 100s for polling
+
     try {
-      const tryonUrl = await generateTryOn(item);
-      if (tryonUrl) {
-        await sheets.update(item.id, { tryonUrl } as any);
-        results.push({ id: item.id, status: 'ok', tryonUrl });
-      } else {
-        results.push({ id: item.id, status: 'skipped' });
+      const predId = await createWithRetry(item);
+      if (predId) {
+        predictions.push({ predId, itemId: item.id });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'unknown';
       if (msg.includes('402')) {
-        results.push({ id: item.id, status: 'error: no credit — add payment at replicate.com/account/billing' });
+        results.push({ id: item.id, status: 'no credit' });
         break;
       }
-      results.push({ id: item.id, status: `error: ${msg}` });
-    }
-
-    // Rate limit pause (skip after last item)
-    if (i < batch.length - 1) {
-      await sleep(DELAY_MS);
+      results.push({ id: item.id, status: `error: ${msg.slice(0, 80)}` });
     }
   }
 
-  const remaining = pending.length - batch.length;
+  // Phase 2: Poll all predictions in parallel
+  const pollResults = await Promise.allSettled(
+    predictions.map(async (p) => {
+      const tryonUrl = await waitForPrediction(p.predId, 90_000);
+      return { itemId: p.itemId, tryonUrl };
+    }),
+  );
+
+  for (const r of pollResults) {
+    if (r.status === 'fulfilled' && r.value.tryonUrl) {
+      await sheets.update(r.value.itemId, { tryonUrl: r.value.tryonUrl } as any);
+      results.push({ id: r.value.itemId, status: 'ok', tryonUrl: r.value.tryonUrl });
+    } else if (r.status === 'fulfilled') {
+      results.push({ id: r.value.itemId, status: 'skipped' });
+    } else {
+      results.push({ id: 'unknown', status: `error: ${r.reason?.message?.slice(0, 80) ?? 'failed'}` });
+    }
+  }
+
+  const ok = results.filter((r) => r.status === 'ok').length;
+  const remaining = pending.length - batch.length + (batch.length - ok - results.filter(r => r.status === 'skipped').length);
   res.status(200).json({
     ok: true,
-    processed: results.filter((r) => r.status === 'ok').length,
-    errors: results.filter((r) => r.status.startsWith('error')).length,
-    remaining: remaining > 0 ? `${remaining} items left — call this endpoint again` : 0,
+    processed: ok,
+    errors: results.filter((r) => r.status.startsWith('error') || r.status === 'no credit').length,
+    remaining,
     results,
   });
 }
