@@ -62,9 +62,13 @@ function findValidOutfit(
   throw new Error('Impossible de composer une tenue valide avec ton armoire actuelle.');
 }
 
-export function generateOutfit(items: WardrobeItem[], context: DailyContext): OutfitRecommendation {
+export function generateOutfit(
+  items: WardrobeItem[],
+  context: DailyContext,
+  recentlyWorn?: Map<string, number>,
+): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
   const outfit = findValidOutfit(scoredItems, context);
   return toRecommendation(outfit, context);
 }
@@ -73,9 +77,10 @@ export function regenerateOutfit(
   items: WardrobeItem[],
   context: DailyContext,
   excludeItemIds: string[] = [],
+  recentlyWorn?: Map<string, number>,
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
   const outfit = findValidOutfit(scoredItems, context, { excludedItemIds: excludeItemIds });
   return toRecommendation(outfit, context);
 }

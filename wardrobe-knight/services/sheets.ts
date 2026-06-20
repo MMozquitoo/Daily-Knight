@@ -16,6 +16,8 @@ import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
 
 const SHEET_NAME = 'Armoire';
 const RANGE = `${SHEET_NAME}!A:P`; // 16 columns A–P (P = image URL)
+const HISTORY_SHEET = 'Historique';
+const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
 
 function getAuth() {
   return new google.auth.GoogleAuth({
@@ -147,4 +149,124 @@ export async function update(id: string, fields: Partial<ClothingItem>): Promise
   });
 
   return true;
+}
+
+/** Delete an item by ID (finds row, deletes it) */
+export async function deleteById(id: string): Promise<boolean> {
+  const sheets = getSheets();
+  const spreadsheetId = sheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: RANGE,
+  });
+
+  const rows = res.data.values ?? [];
+  const rowIndex = rows.findIndex((row, i) => i > 0 && row[0] === id);
+  if (rowIndex === -1) return false;
+
+  const sheetMeta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(sheetId,title))',
+  });
+  const sheet = sheetMeta.data.sheets?.find((s) => s.properties?.title === SHEET_NAME);
+  if (!sheet?.properties?.sheetId && sheet?.properties?.sheetId !== 0) return false;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: sheet.properties.sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIndex,
+              endIndex: rowIndex + 1,
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Worn History ("Historique" tab)
+// ---------------------------------------------------------------------------
+
+export interface WornEntry {
+  date: string;
+  top?: string;
+  bottom?: string;
+  shoes?: string;
+  outerwear?: string;
+}
+
+async function ensureHistorySheet(): Promise<void> {
+  const sheets = getSheets();
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId(),
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: HISTORY_SHEET } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${HISTORY_SHEET}!A1:E1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['Date', 'Top', 'Bottom', 'Shoes', 'Outerwear']] },
+    });
+  } catch (err: any) {
+    if (err?.message?.includes('already exists')) return;
+    throw err;
+  }
+}
+
+/** Log an outfit as worn on a given date */
+export async function logWorn(
+  date: string,
+  itemIds: { top?: string; bottom?: string; shoes?: string; outerwear?: string },
+): Promise<void> {
+  await ensureHistorySheet();
+  const sheets = getSheets();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId(),
+    range: HISTORY_RANGE,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: {
+      values: [[date, itemIds.top ?? '', itemIds.bottom ?? '', itemIds.shoes ?? '', itemIds.outerwear ?? '']],
+    },
+  });
+}
+
+/** Get worn history for the last N days */
+export async function getWornRecently(days: number = 7): Promise<WornEntry[]> {
+  await ensureHistorySheet();
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId(),
+    range: HISTORY_RANGE,
+  });
+
+  const rows = res.data.values ?? [];
+  if (rows.length <= 1) return [];
+
+  const today = new Date();
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  return rows
+    .slice(1)
+    .filter((row) => row[0] && row[0] >= cutoffStr)
+    .map((row) => ({
+      date: row[0],
+      top: row[1] || undefined,
+      bottom: row[2] || undefined,
+      shoes: row[3] || undefined,
+      outerwear: row[4] || undefined,
+    }));
 }

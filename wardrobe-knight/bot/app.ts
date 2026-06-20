@@ -13,6 +13,7 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
+import { askAdvisor } from '../services/advisor.js';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
 import type { DayWeather } from '../types/weather.js';
@@ -37,12 +38,32 @@ let lastItems: ClothingItem[] = [];
 let lastWeather: DayWeather | null = null;
 let lastAgenda: AgendaSummary | null = null;
 
+function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
+  const map = new Map<string, number>();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (const entry of history) {
+    const entryDate = new Date(entry.date + 'T00:00:00');
+    const daysDiff = Math.round((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+    for (const id of [entry.top, entry.bottom, entry.shoes, entry.outerwear]) {
+      if (!id) continue;
+      const existing = map.get(id);
+      if (existing === undefined || daysDiff < existing) {
+        map.set(id, daysDiff);
+      }
+    }
+  }
+  return map;
+}
+
 async function getOutfitContext() {
   const loc = getUserLocation();
-  const [weather, agenda, items] = await Promise.all([
+  const [weather, agenda, items, wornHistory] = await Promise.all([
     fetchWeather(loc.lat, loc.lon),
     fetchTodayAgenda(),
     sheets.getAll(),
+    sheets.getWornRecently(7),
   ]);
 
   lastItems = items;
@@ -51,16 +72,23 @@ async function getOutfitContext() {
 
   const wardrobeItems = toWardrobeItems(items);
   const context = buildDailyContext(weather, agenda);
+  const recentlyWorn = buildCooldownMap(wornHistory);
 
-  return { weather, agenda, items, wardrobeItems, context };
+  return { weather, agenda, items, wardrobeItems, context, recentlyWorn };
 }
 
 app.command('/outfit', async ({ ack, respond }) => {
   await ack();
   try {
-    const { weather, items, wardrobeItems, context } = await getOutfitContext();
-    const recommendation = generateOutfit(wardrobeItems, context);
+    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+    const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
     lastRecommendation = recommendation;
+    await sheets.logWorn(todayStr(), {
+      top: recommendation.wear.top,
+      bottom: recommendation.wear.bottom,
+      shoes: recommendation.wear.shoes,
+      outerwear: recommendation.wear.outerwear,
+    });
     await respond({ blocks: outfitMessage(recommendation, items, weather) as any });
   } catch (err) {
     await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
@@ -104,10 +132,20 @@ function isDM(message: { channel_type?: string }): boolean {
   return message.channel_type === 'im';
 }
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
-  const { weather, items, wardrobeItems, context } = await getOutfitContext();
-  const recommendation = generateOutfit(wardrobeItems, context);
+  const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+  const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
   lastRecommendation = recommendation;
+  await sheets.logWorn(todayStr(), {
+    top: recommendation.wear.top,
+    bottom: recommendation.wear.bottom,
+    shoes: recommendation.wear.shoes,
+    outerwear: recommendation.wear.outerwear,
+  });
   await say({ blocks: outfitMessage(recommendation, items, weather) as any });
 }
 
@@ -324,24 +362,38 @@ app.message(async ({ message, say }) => {
       return;
     }
 
-    await say(`:shield: Je n'ai pas compris. Essaie :\n`
-      + `• *« je mets quoi ? »* — Tenue du jour\n`
-      + `• *« armoire »* — Tes vêtements\n`
-      + `• *« agenda »* — Ton agenda\n`
-      + `• *« météo »* — La météo\n`
-      + `• *« aide »* — Toutes les commandes`);
+    const userId = 'user' in message ? (message as any).user : 'unknown';
+    try {
+      const items = await sheets.getAll();
+      const answer = await askAdvisor(
+        userId,
+        text,
+        items,
+        lastWeather ?? undefined,
+        lastAgenda ?? undefined,
+      );
+      await say(answer);
+    } catch (err) {
+      await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
   }
 });
 
 app.action('regenerate_outfit', async ({ ack, respond }) => {
   await ack();
   try {
-    const { weather, items, wardrobeItems, context } = await getOutfitContext();
+    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
     const excludeIds = lastRecommendation
       ? [lastRecommendation.wear.top, lastRecommendation.wear.bottom].filter(Boolean) as string[]
       : [];
-    const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds);
+    const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn);
     lastRecommendation = recommendation;
+    await sheets.logWorn(todayStr(), {
+      top: recommendation.wear.top,
+      bottom: recommendation.wear.bottom,
+      shoes: recommendation.wear.shoes,
+      outerwear: recommendation.wear.outerwear,
+    });
     await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
   } catch (err) {
     await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
@@ -351,10 +403,16 @@ app.action('regenerate_outfit', async ({ ack, respond }) => {
 app.action('more_formal', async ({ ack, respond }) => {
   await ack();
   try {
-    const { weather, items, wardrobeItems, context } = await getOutfitContext();
+    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
     context.agenda = { ...context.agenda, highestFormality: 'formal' };
-    const recommendation = generateOutfit(wardrobeItems, context);
+    const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
     lastRecommendation = recommendation;
+    await sheets.logWorn(todayStr(), {
+      top: recommendation.wear.top,
+      bottom: recommendation.wear.bottom,
+      shoes: recommendation.wear.shoes,
+      outerwear: recommendation.wear.outerwear,
+    });
     await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
   } catch (err) {
     await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);

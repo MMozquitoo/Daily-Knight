@@ -68,7 +68,21 @@ function scoreStyle(item: WardrobeItem, context: DailyContext): number {
   return STYLE_SCORES.mismatch;
 }
 
-export function scoreItems(items: WardrobeItem[], context: DailyContext): ScoredItem[] {
+function getCooldownMultiplier(itemId: string, recentlyWorn?: Map<string, number>): number {
+  if (!recentlyWorn) return 1;
+  const daysSinceWorn = recentlyWorn.get(itemId);
+  if (daysSinceWorn === undefined) return 1;
+  if (daysSinceWorn <= 1) return 0;
+  if (daysSinceWorn === 2) return 0.4;
+  if (daysSinceWorn === 3) return 0.7;
+  return 1;
+}
+
+export function scoreItems(
+  items: WardrobeItem[],
+  context: DailyContext,
+  recentlyWorn?: Map<string, number>,
+): ScoredItem[] {
   return items
     .map((item) => {
       const breakdown = {
@@ -77,10 +91,11 @@ export function scoreItems(items: WardrobeItem[], context: DailyContext): Scored
         context: scoreContext(item, context),
         style: scoreStyle(item, context),
       };
+      const rawScore = breakdown.weather + breakdown.formality + breakdown.context + breakdown.style;
       return {
         item,
         breakdown,
-        score: breakdown.weather + breakdown.formality + breakdown.context + breakdown.style,
+        score: rawScore * getCooldownMultiplier(item.id, recentlyWorn),
       };
     })
     .filter((entry) => {
