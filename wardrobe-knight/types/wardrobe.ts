@@ -26,6 +26,7 @@ export interface ClothingItem {
   etat: ItemCondition;     // O: neuf, bon, usé
   imageUrl?: string;       // P: Slack permalink (optional)
   tryonUrl?: string;       // Q: Virtual try-on image URL (optional)
+  productUrl?: string;     // R: AI-generated product image URL (optional)
 }
 
 /** Palette temperature (column G) */

@@ -46,13 +46,14 @@ export function outfitMessage(
     ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
     : '_Rien de plus_';
 
-  // Collect try-on images for the outfit
-  const tryonImages: { url: string; alt: string }[] = [];
+  // Collect images for the outfit (prefer product image > try-on > original photo)
+  const outfitImages: { url: string; alt: string }[] = [];
   for (const id of [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes, recommendation.wear.outerwear]) {
     if (!id) continue;
     const item = itemMap.get(id);
-    if (item?.tryonUrl) {
-      tryonImages.push({ url: item.tryonUrl, alt: `Try-on: ${itemDisplayName(item)}` });
+    const imageUrl = item?.productUrl || item?.tryonUrl || item?.imageUrl;
+    if (imageUrl) {
+      outfitImages.push({ url: imageUrl, alt: itemDisplayName(item!) });
     }
   }
 
@@ -78,7 +79,7 @@ export function outfitMessage(
       type: 'section',
       text: { type: 'mrkdwn', text: `*POURQUOI*\n_${recommendation.why}_` },
     },
-    ...tryonImages.map((img) => ({
+    ...outfitImages.map((img) => ({
       type: 'image',
       image_url: img.url,
       alt_text: img.alt,
@@ -252,7 +253,7 @@ export function wardrobeList(items: ClothingItem[]): object[] {
     const label = catLabel[cat] ?? cat.toUpperCase();
     const lines = catItems.map((i) => {
       const status = i.etat === 'usé' ? ' :warning:' : '';
-      const photo = i.imageUrl ? ' :camera:' : '';
+      const photo = i.productUrl ? ' :framed_picture:' : i.imageUrl ? ' :camera:' : '';
       const name = `${i.categorie} ${i.sousCategorie}`.trim();
       return `• ${i.id} — *${name}*${status}${photo} (${i.couleur}, ${i.marque}, f${i.formalite})`;
     });

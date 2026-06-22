@@ -15,7 +15,7 @@ import { CATEGORY_PREFIXES } from '../types/wardrobe.js';
 import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
 
 const SHEET_NAME = 'Armoire';
-const RANGE = `${SHEET_NAME}!A:Q`; // 17 columns A–Q (P = image URL, Q = try-on URL)
+const RANGE = `${SHEET_NAME}!A:R`; // 18 columns A–R (P = image URL, Q = try-on URL, R = product image URL)
 const HISTORY_SHEET = 'Historique';
 const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
 
@@ -54,6 +54,7 @@ function rowToItem(row: string[]): ClothingItem {
     etat: (row[14] ?? 'bon') as ClothingItem['etat'],
     imageUrl: row[15] || undefined,
     tryonUrl: row[16] || undefined,
+    productUrl: row[17] || undefined,
   };
 }
 
@@ -77,6 +78,7 @@ function itemToRow(item: ClothingItem): string[] {
     item.etat,
     item.imageUrl ?? '',
     item.tryonUrl ?? '',
+    item.productUrl ?? '',
   ];
 }
 
@@ -122,7 +124,7 @@ export async function append(item: ClothingItem): Promise<void> {
   const nextRow = (res.data.values?.length ?? 1) + 1;
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${nextRow}:P${nextRow}`,
+    range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [itemToRow(item)],
@@ -148,7 +150,7 @@ export async function update(id: string, fields: Partial<ClothingItem>): Promise
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${rowNumber}:Q${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:R${rowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [itemToRow(updated)],

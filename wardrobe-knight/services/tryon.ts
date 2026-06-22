@@ -1,6 +1,7 @@
 import Replicate from 'replicate';
 import { categoryFromSheet } from '../types/wardrobe.js';
 import type { ClothingItem } from '../types/wardrobe.js';
+import { uploadImageFromUrl } from './blob.js';
 
 let client: Replicate | null = null;
 
@@ -45,7 +46,7 @@ function extractUrl(output: unknown): string | null {
   return null;
 }
 
-/** Generate a single try-on (blocking — waits for result) */
+/** Generate a single try-on (blocking — waits for result, persisted to Blob) */
 export async function generateTryOn(
   item: ClothingItem,
   baseImageUrl?: string,
@@ -55,7 +56,9 @@ export async function generateTryOn(
   const output = await replicate.run(`cuuupid/idm-vton:${MODEL_VERSION}`, {
     input: buildInput(item, baseImageUrl),
   });
-  return extractUrl(output);
+  const tempUrl = extractUrl(output);
+  if (!tempUrl) return null;
+  return uploadImageFromUrl(tempUrl, `tryon/${item.id}.png`);
 }
 
 /** Create a prediction without waiting (returns prediction ID) */
@@ -72,13 +75,22 @@ export async function createTryOnPrediction(
   return prediction.id;
 }
 
-/** Poll a prediction until complete, return output URL */
-export async function waitForPrediction(predictionId: string, timeoutMs: number = 120_000): Promise<string | null> {
+/** Poll a prediction until complete, persist to Blob, return permanent URL */
+export async function waitForPrediction(
+  predictionId: string,
+  timeoutMs: number = 120_000,
+  itemId?: string,
+): Promise<string | null> {
   const replicate = getClient();
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const p = await replicate.predictions.get(predictionId);
-    if (p.status === 'succeeded') return extractUrl(p.output);
+    if (p.status === 'succeeded') {
+      const tempUrl = extractUrl(p.output);
+      if (!tempUrl) return null;
+      const filename = itemId ? `tryon/${itemId}.png` : `tryon/${predictionId}.png`;
+      return uploadImageFromUrl(tempUrl, filename);
+    }
     if (p.status === 'failed' || p.status === 'canceled') throw new Error(`Prediction ${p.status}: ${p.error}`);
     await new Promise((r) => setTimeout(r, 3000));
   }

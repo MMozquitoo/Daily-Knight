@@ -305,12 +305,12 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
         `Raison : ${planned.why}`,
       ].filter(Boolean);
 
-      // Show saved try-on images (pre-generated, no API cost)
       for (const id of [planned.top, planned.bottom, planned.shoes, planned.outerwear]) {
         if (!id) continue;
         const item = allItems.find((i) => i.id === id);
-        if (item?.tryonUrl) {
-          lines.push(`Image try-on ${item.id} : ${item.tryonUrl}`);
+        const imageUrl = item?.productUrl || item?.tryonUrl;
+        if (imageUrl) {
+          lines.push(`Image ${item!.id} : ${imageUrl}`);
         }
       }
 

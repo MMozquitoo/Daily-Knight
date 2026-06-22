@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import Replicate from 'replicate';
 import * as sheets from '../services/sheets.js';
+import { uploadImageFromUrl } from '../services/blob.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -76,9 +77,9 @@ export default async function handler(_req: Request, res: Response): Promise<voi
 
   for (const r of pollResults) {
     if (r.status === 'fulfilled' && r.value.cleanUrl) {
-      // Save clean photo URL in tryonUrl column (we'll use it for display + try-on later)
-      await sheets.update(r.value.itemId, { tryonUrl: r.value.cleanUrl } as any);
-      results.push({ id: r.value.itemId, status: 'ok', cleanUrl: r.value.cleanUrl });
+      const permanentUrl = await uploadImageFromUrl(r.value.cleanUrl, `clean/${r.value.itemId}.png`);
+      await sheets.update(r.value.itemId, { tryonUrl: permanentUrl } as any);
+      results.push({ id: r.value.itemId, status: 'ok', cleanUrl: permanentUrl });
     } else if (r.status === 'rejected') {
       results.push({ id: 'unknown', status: `error: ${r.reason?.message?.slice(0, 80) ?? 'failed'}` });
     }

@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@slack/bolt": "^4.3.0",
+    "@vercel/blob": "^2.4.1",
     "dotenv": "^17.4.2",
     "googleapis": "^148.0.0",
     "replicate": "^1.4.0",

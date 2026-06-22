@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import * as sheets from '../services/sheets.js';
-import { createTryOnPrediction, waitForPrediction } from '../services/tryon.js';
+import { createProductPrediction, waitForProductPrediction } from '../services/product-image.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -8,10 +8,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function createWithRetry(item: Parameters<typeof createTryOnPrediction>[0], maxRetries = 3): Promise<string | null> {
+async function createWithRetry(
+  item: Parameters<typeof createProductPrediction>[0],
+  maxRetries = 3,
+): Promise<string | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await createTryOnPrediction(item);
+      return await createProductPrediction(item);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('429') && attempt < maxRetries) {
@@ -28,23 +31,21 @@ async function createWithRetry(item: Parameters<typeof createTryOnPrediction>[0]
 
 export default async function handler(_req: Request, res: Response): Promise<void> {
   const items = await sheets.getAll();
-  const pending = items.filter((i) => i.imageUrl && !i.tryonUrl);
+  const pending = items.filter((i) => !i.productUrl);
 
   if (pending.length === 0) {
-    res.status(200).json({ ok: true, message: 'All items already have try-on images', total: items.length });
+    res.status(200).json({ ok: true, message: 'All items already have product images', total: items.length });
     return;
   }
 
-  // Process up to 12 items: create sequentially (rate limited), poll in parallel
   const BATCH = 12;
   const batch = pending.slice(0, BATCH);
   const predictions: { predId: string; itemId: string }[] = [];
-  const results: { id: string; status: string; tryonUrl?: string }[] = [];
+  const results: { id: string; status: string; productUrl?: string }[] = [];
   const startTime = Date.now();
 
-  // Phase 1: Create predictions one at a time with retry on 429
   for (const item of batch) {
-    if (Date.now() - startTime > 200_000) break; // leave 100s for polling
+    if (Date.now() - startTime > 200_000) break;
 
     try {
       const predId = await createWithRetry(item);
@@ -61,18 +62,17 @@ export default async function handler(_req: Request, res: Response): Promise<voi
     }
   }
 
-  // Phase 2: Poll all predictions in parallel
   const pollResults = await Promise.allSettled(
     predictions.map(async (p) => {
-      const tryonUrl = await waitForPrediction(p.predId, 90_000, p.itemId);
-      return { itemId: p.itemId, tryonUrl };
+      const productUrl = await waitForProductPrediction(p.predId, p.itemId, 60_000);
+      return { itemId: p.itemId, productUrl };
     }),
   );
 
   for (const r of pollResults) {
-    if (r.status === 'fulfilled' && r.value.tryonUrl) {
-      await sheets.update(r.value.itemId, { tryonUrl: r.value.tryonUrl } as any);
-      results.push({ id: r.value.itemId, status: 'ok', tryonUrl: r.value.tryonUrl });
+    if (r.status === 'fulfilled' && r.value.productUrl) {
+      await sheets.update(r.value.itemId, { productUrl: r.value.productUrl } as any);
+      results.push({ id: r.value.itemId, status: 'ok', productUrl: r.value.productUrl });
     } else if (r.status === 'fulfilled') {
       results.push({ id: r.value.itemId, status: 'skipped' });
     } else {
@@ -81,7 +81,7 @@ export default async function handler(_req: Request, res: Response): Promise<voi
   }
 
   const ok = results.filter((r) => r.status === 'ok').length;
-  const remaining = pending.length - batch.length + (batch.length - ok - results.filter(r => r.status === 'skipped').length);
+  const remaining = pending.length - batch.length + (batch.length - ok);
   res.status(200).json({
     ok: true,
     processed: ok,
