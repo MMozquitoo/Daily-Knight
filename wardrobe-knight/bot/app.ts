@@ -387,6 +387,28 @@ app.message(async ({ message, say }) => {
         lastAgenda ?? undefined,
       );
       await say(answer);
+
+      // Show images for any item IDs mentioned in the response
+      const mentionedIds = answer.match(/[A-Z]{2}-\d{2,}/g);
+      if (mentionedIds) {
+        const uniqueIds = [...new Set(mentionedIds)];
+        const imageBlocks: object[] = [];
+        for (const id of uniqueIds) {
+          const item = items.find((i) => i.id === id);
+          const imageUrl = item?.productUrl || item?.tryonUrl;
+          if (imageUrl) {
+            const name = [item!.marque, item!.categorie, item!.sousCategorie].filter(Boolean).join(' ');
+            imageBlocks.push({
+              type: 'image',
+              image_url: imageUrl,
+              alt_text: `${id} — ${name}`,
+            });
+          }
+        }
+        if (imageBlocks.length > 0) {
+          await say({ blocks: imageBlocks as any });
+        }
+      }
     } catch (err) {
       await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
