@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import * as sheets from '../services/sheets.js';
 import { createProductPrediction, waitForProductPrediction } from '../services/product-image.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 300 };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -29,7 +29,7 @@ async function createWithRetry(
   return null;
 }
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
   const items = await sheets.getAll();
   const pending = items.filter((i) => !i.productUrl);
 
@@ -38,14 +38,15 @@ export default async function handler(_req: Request, res: Response): Promise<voi
     return;
   }
 
-  const BATCH = 12;
+  const limit = parseInt(req.query.limit as string) || 5;
+  const BATCH = Math.min(limit, 10);
   const batch = pending.slice(0, BATCH);
   const predictions: { predId: string; itemId: string }[] = [];
   const results: { id: string; status: string; productUrl?: string }[] = [];
   const startTime = Date.now();
 
   for (const item of batch) {
-    if (Date.now() - startTime > 200_000) break;
+    if (Date.now() - startTime > 30_000) break;
 
     try {
       const predId = await createWithRetry(item);
