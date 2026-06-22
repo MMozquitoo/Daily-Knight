@@ -10,7 +10,7 @@ function sleep(ms: number): Promise<void> {
 
 async function createWithRetry(
   item: Parameters<typeof createProductPrediction>[0],
-  maxRetries = 3,
+  maxRetries = 2,
 ): Promise<string | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -31,27 +31,46 @@ async function createWithRetry(
 
 export default async function handler(req: Request, res: Response): Promise<void> {
   const items = await sheets.getAll();
-  const pending = items.filter((i) => !i.productUrl);
+  const regenerate = req.query.regenerate === 'true';
+  const itemId = req.query.id as string | undefined;
+
+  let pending: typeof items;
+  if (itemId) {
+    pending = items.filter((i) => i.id === itemId);
+  } else if (regenerate) {
+    pending = items.filter((i) => i.imageUrl);
+  } else {
+    pending = items.filter((i) => !i.productUrl);
+  }
 
   if (pending.length === 0) {
-    res.status(200).json({ ok: true, message: 'All items already have product images', total: items.length });
+    res.status(200).json({ ok: true, message: 'No items to process', total: items.length });
     return;
   }
 
-  const limit = parseInt(req.query.limit as string) || 5;
-  const BATCH = Math.min(limit, 10);
+  // Claude Vision + FLUX takes ~15s per item, default to 2
+  const limit = parseInt(req.query.limit as string) || 2;
+  const BATCH = Math.min(limit, 5);
   const batch = pending.slice(0, BATCH);
-  const predictions: { predId: string; itemId: string }[] = [];
   const results: { id: string; status: string; productUrl?: string }[] = [];
   const startTime = Date.now();
 
+  // Process sequentially: vision analysis + prediction creation + polling per item
   for (const item of batch) {
-    if (Date.now() - startTime > 30_000) break;
+    if (Date.now() - startTime > 45_000) break;
 
     try {
       const predId = await createWithRetry(item);
-      if (predId) {
-        predictions.push({ predId, itemId: item.id });
+      if (!predId) {
+        results.push({ id: item.id, status: 'skipped' });
+        continue;
+      }
+      const productUrl = await waitForProductPrediction(predId, item.id, 30_000);
+      if (productUrl) {
+        await sheets.update(item.id, { productUrl } as any);
+        results.push({ id: item.id, status: 'ok', productUrl });
+      } else {
+        results.push({ id: item.id, status: 'skipped' });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'unknown';
@@ -60,24 +79,6 @@ export default async function handler(req: Request, res: Response): Promise<void
         break;
       }
       results.push({ id: item.id, status: `error: ${msg.slice(0, 80)}` });
-    }
-  }
-
-  const pollResults = await Promise.allSettled(
-    predictions.map(async (p) => {
-      const productUrl = await waitForProductPrediction(p.predId, p.itemId, 60_000);
-      return { itemId: p.itemId, productUrl };
-    }),
-  );
-
-  for (const r of pollResults) {
-    if (r.status === 'fulfilled' && r.value.productUrl) {
-      await sheets.update(r.value.itemId, { productUrl: r.value.productUrl } as any);
-      results.push({ id: r.value.itemId, status: 'ok', productUrl: r.value.productUrl });
-    } else if (r.status === 'fulfilled') {
-      results.push({ id: r.value.itemId, status: 'skipped' });
-    } else {
-      results.push({ id: 'unknown', status: `error: ${r.reason?.message?.slice(0, 80) ?? 'failed'}` });
     }
   }
 
