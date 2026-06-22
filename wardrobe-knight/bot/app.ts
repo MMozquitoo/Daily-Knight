@@ -389,29 +389,32 @@ app.message(async ({ message, say }) => {
       await say(answer);
 
       // Show images for any item IDs mentioned in the response
-      const mentionedIds = answer.match(/[A-Z]{2}-\d{2,}/g);
-      if (mentionedIds) {
-        const uniqueIds = [...new Set(mentionedIds)];
-        const imageBlocks: object[] = [];
-        for (const id of uniqueIds) {
-          const item = items.find((i) => i.id === id);
-          if (!item) continue;
-          // Only use permanent URLs (Blob or proxy), skip expired Replicate URLs
-          const imageUrl = item.productUrl
-            || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
-            || item.imageUrl;
-          if (imageUrl) {
-            const name = [item.marque, item.categorie, item.sousCategorie, item.couleur].filter(Boolean).join(' ');
+      try {
+        const mentionedIds = answer.match(/[A-Z]{2}-\d{2,}/g);
+        if (mentionedIds) {
+          const uniqueIds = [...new Set(mentionedIds)];
+          const imageBlocks: object[] = [];
+          for (const id of uniqueIds) {
+            const item = items.find((i) => i.id === id);
+            if (!item) continue;
+            const imgUrl = item.productUrl
+              || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
+              || item.imageUrl;
+            if (!imgUrl) continue;
+            const name = [item.marque, item.categorie, item.sousCategorie, item.couleur].filter(Boolean).join(' ') || item.id;
             imageBlocks.push({
               type: 'image',
-              image_url: imageUrl,
+              title: { type: 'plain_text', text: name },
+              image_url: imgUrl,
               alt_text: name,
             });
           }
+          if (imageBlocks.length > 0) {
+            await say({ text: 'Images des vêtements mentionnés', blocks: imageBlocks as any });
+          }
         }
-        if (imageBlocks.length > 0) {
-          await say({ blocks: imageBlocks as any });
-        }
+      } catch {
+        // Don't fail the whole response if images can't be shown
       }
     } catch (err) {
       await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
