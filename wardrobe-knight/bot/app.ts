@@ -395,13 +395,17 @@ app.message(async ({ message, say }) => {
         const imageBlocks: object[] = [];
         for (const id of uniqueIds) {
           const item = items.find((i) => i.id === id);
-          const imageUrl = item?.productUrl || item?.tryonUrl;
+          if (!item) continue;
+          // Only use permanent URLs (Blob or proxy), skip expired Replicate URLs
+          const imageUrl = item.productUrl
+            || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
+            || item.imageUrl;
           if (imageUrl) {
-            const name = [item!.marque, item!.categorie, item!.sousCategorie].filter(Boolean).join(' ');
+            const name = [item.marque, item.categorie, item.sousCategorie, item.couleur].filter(Boolean).join(' ');
             imageBlocks.push({
               type: 'image',
               image_url: imageUrl,
-              alt_text: `${id} — ${name}`,
+              alt_text: name,
             });
           }
         }

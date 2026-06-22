@@ -31,7 +31,7 @@ export function outfitMessage(
     if (!id) return '';
     const item = itemMap.get(id);
     if (!item) return `${label} : _inconnu_`;
-    return `${label} : *${itemDisplayName(item)}* (${item.couleur})`;
+    return `${label} : *${itemDisplayName(item)}* — ${item.couleur}${item.matiere ? ', ' + item.matiere : ''}`;
   }
 
   const wearLines = [
@@ -46,14 +46,17 @@ export function outfitMessage(
     ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
     : '_Rien de plus_';
 
-  // Collect images for the outfit (prefer product image > try-on > original photo)
+  // Collect images for the outfit (prefer product image > try-on (Blob only) > original photo)
   const outfitImages: { url: string; alt: string }[] = [];
   for (const id of [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes, recommendation.wear.outerwear]) {
     if (!id) continue;
     const item = itemMap.get(id);
-    const imageUrl = item?.productUrl || item?.tryonUrl || item?.imageUrl;
+    if (!item) continue;
+    const imageUrl = item.productUrl
+      || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
+      || item.imageUrl;
     if (imageUrl) {
-      outfitImages.push({ url: imageUrl, alt: itemDisplayName(item!) });
+      outfitImages.push({ url: imageUrl, alt: itemDisplayName(item) });
     }
   }
 
