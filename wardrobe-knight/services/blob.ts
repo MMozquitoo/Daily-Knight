@@ -12,6 +12,8 @@ export async function uploadImageFromUrl(
   const blob = await put(`wardrobe-knight/${filename}`, buffer, {
     access: 'public',
     contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
   });
 
   return blob.url;
@@ -25,6 +27,8 @@ export async function uploadImageBuffer(
   const blob = await put(`wardrobe-knight/${filename}`, buffer, {
     access: 'public',
     contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
   });
 
   return blob.url;
