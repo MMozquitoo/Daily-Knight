@@ -20,39 +20,55 @@ function getAnthropic(): Anthropic {
   return anthropicClient;
 }
 
-const ANALYSIS_PROMPT = `You are a fashion product photographer's assistant. Analyze this garment photo in extreme detail to help recreate it as a professional product image.
+function buildAnalysisPrompt(item: ClothingItem): string {
+  const context = [
+    item.marque && `Brand: ${item.marque}`,
+    item.modele && `Model: ${item.modele}`,
+    item.categorie && `Category: ${item.categorie}`,
+    item.sousCategorie && `Subcategory: ${item.sousCategorie}`,
+    item.couleur && `Color declared: ${item.couleur}`,
+    item.matiere && `Material declared: ${item.matiere}`,
+    item.coupe && `Fit: ${item.coupe}`,
+  ].filter(Boolean).join(', ');
 
-Describe EVERY visual detail you can see:
+  return `You are an expert fashion product analyst. Your job is to produce the MOST ACCURATE, EXHAUSTIVE description of this garment so that a text-to-image AI can reproduce it as a faithful product photo.
 
-1. **Type & silhouette**: Exact garment type (low-top sneaker, chelsea boot, slim chino, etc.), overall shape, height (ankle/mid/high for shoes), profile (chunky/slim/flat)
-2. **Material & texture**: Exact material (suede, smooth leather, canvas, denim, knit, nylon, mesh, etc.), visible texture (grainy, smooth, brushed, matte, glossy, pebbled)
-3. **Color**: Precise color (not just "black" — dark navy, charcoal, faded black, off-white, cream, etc.), any color variations or gradients
-4. **Construction details**: Visible stitching (contrast thread?), seams, panels, overlays, perforations, embossing, quilting
-5. **Hardware & accents**: Laces (color, thickness, flat/round), eyelets (metal color), zippers, buckles, buttons, logos (placement, subtle/prominent)
-6. **Sole** (for shoes): Color, thickness, shape (flat, wedge, chunky platform), material (rubber, leather, gum)
-7. **Brand identification**: If brand is visible, mention the brand name and any specific model characteristics
-8. **Distinctive features**: Anything that makes this piece unique — contrast elements, unusual details, aging/patina
+KNOWN METADATA: ${context}
 
-Write a single dense paragraph describing EXACTLY what this garment looks like. Be extremely specific about proportions, materials, and colors. This description will be used to generate a product photo, so accuracy is critical — every wrong detail means the generated image won't match the real item.`;
+CRITICAL RULES:
+- If you recognize the BRAND and MODEL, name them explicitly (e.g. "Axel Arigato Clean 90 sneaker", "Seagale Action Merino polo"). The image generator knows real brands and will produce much more accurate results.
+- NEVER generalize. Say "dark navy brushed suede" not "dark material". Say "slim flat white cotton laces" not "white laces". Say "thin flat vulcanized rubber sole, same navy color as upper" not "flat sole".
+- Describe the EXACT silhouette proportions: is the toe round, squared, pointed? Is the shoe narrow or wide? Is the collar padded or thin? Is a jacket cropped or hip-length?
+- For shoes: describe the sole separately (thickness in mm if possible, color, material, whether it contrasts or matches), the upper construction panel by panel, the tongue, the heel tab.
+- For tops: describe collar type, sleeve length, button count, placket style, hem shape, any prints/patterns in detail.
+- For bottoms: describe waistband, rise, leg taper, hem, pocket style.
+- Mention EVERYTHING: contrast stitching, metal hardware color (gold/silver/gunmetal), logo placement and size, perforations, textures, lining visible at collar, patina or wear marks.
+- If the photo is at a bad angle or dark, USE THE BRAND+MODEL METADATA to fill in what you know about that product's design. State when you're using brand knowledge vs what's visible.
 
-async function analyzeGarmentPhoto(imageUrl: string): Promise<string | null> {
+Write ONE dense paragraph of 150-300 words. Every word must add visual information. No filler phrases like "this is a" or "featuring a". Start directly with the garment description.`;
+}
+
+async function analyzeGarmentPhoto(imageUrl: string, item: ClothingItem): Promise<string | null> {
   const anthropic = getAnthropic();
 
   const response = await fetch(imageUrl);
   if (!response.ok) return null;
   const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length < 1000) return null;
   const base64 = buffer.toString('base64');
   const contentType = response.headers.get('content-type') || 'image/jpeg';
-  const mediaType = contentType.startsWith('image/') ? contentType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' : 'image/jpeg';
+  const mediaType = contentType.startsWith('image/')
+    ? contentType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+    : 'image/jpeg';
 
   const msg = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 800,
+    max_tokens: 1200,
     messages: [{
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-        { type: 'text', text: ANALYSIS_PROMPT },
+        { type: 'text', text: buildAnalysisPrompt(item) },
       ],
     }],
   });
@@ -62,33 +78,37 @@ async function analyzeGarmentPhoto(imageUrl: string): Promise<string | null> {
 }
 
 function buildProductPrompt(item: ClothingItem, visionDescription?: string | null): string {
+  const brandModel = [item.marque, item.modele].filter(Boolean).join(' ');
+
   if (visionDescription) {
     return [
-      `Professional high-quality product photograph based on this exact description: ${visionDescription}`,
-      `Reproduce this garment EXACTLY as described — correct material, color, shape, details, and proportions.`,
-      `Clean white studio background, e-commerce catalog style, studio lighting with soft shadows.`,
-      `Show the garment from a 3/4 angle, displaying its full shape and key details.`,
-      `Photorealistic, sharp focus, high detail. No deformed elements, no added text, no unrealistic proportions.`,
-      `Square format, centered composition.`,
+      `Professional e-commerce product photograph of ${brandModel ? `a ${brandModel}` : 'this garment'}:`,
+      visionDescription,
+      `PHOTOGRAPHY REQUIREMENTS: Shot on clean pure white (#FFFFFF) seamless studio background.`,
+      `3/4 front angle showing the full garment shape, proportions, and key details.`,
+      `Soft diffused studio lighting from upper-left, subtle ground shadow, no harsh reflections.`,
+      `Photorealistic rendering, tack-sharp focus, natural material textures clearly visible.`,
+      `The garment must match the description EXACTLY — correct material (suede must look like suede, not leather), correct color shade, correct proportions and silhouette.`,
+      `No mannequin, no model, no hanger — garment floating or placed naturally.`,
+      `No watermarks, no text overlays, no brand logos added to the image.`,
     ].join(' ');
   }
 
   const garmentType = item.sousCategorie
     ? `${item.categorie} ${item.sousCategorie}`
     : item.categorie;
-  const brand = item.marque ? ` by ${item.marque}` : '';
-  const model = item.modele ? ` (${item.modele})` : '';
+  const brand = item.marque ? ` ${item.marque}` : '';
+  const model = item.modele ? ` ${item.modele}` : '';
   const color = item.couleur || 'neutral';
-  const material = item.matiere ? `, ${item.matiere}` : '';
+  const material = item.matiere || '';
   const fit = item.coupe ? `, ${item.coupe} fit` : '';
 
   return [
-    `Professional high-quality product photograph of a ${color} ${garmentType}${brand}${model}${material}${fit}.`,
-    `Clean white studio background, e-commerce catalog style.`,
-    `Studio lighting with soft shadows, photorealistic, high detail.`,
-    `Show full shape and silhouette from a 3/4 angle.`,
-    `No deformed elements, no text, no unrealistic proportions.`,
-    `Square format, centered composition.`,
+    `Professional e-commerce product photograph of a${brand}${model} ${color} ${material} ${garmentType}${fit}.`,
+    `Clean pure white (#FFFFFF) seamless studio background, 3/4 front angle.`,
+    `Soft diffused studio lighting, subtle ground shadow, photorealistic, tack-sharp focus.`,
+    `Natural material textures clearly visible. No mannequin, no model, no hanger.`,
+    `No watermarks, no text overlays, no brand logos added.`,
   ].join(' ');
 }
 
@@ -106,7 +126,7 @@ export async function generateProductImage(item: ClothingItem): Promise<string |
   let visionDescription: string | null = null;
   if (item.imageUrl) {
     try {
-      visionDescription = await analyzeGarmentPhoto(item.imageUrl);
+      visionDescription = await analyzeGarmentPhoto(item.imageUrl, item);
     } catch { /* fall back to metadata-only prompt */ }
   }
 
@@ -133,7 +153,7 @@ export async function createProductPrediction(item: ClothingItem): Promise<strin
   let visionDescription: string | null = null;
   if (item.imageUrl) {
     try {
-      visionDescription = await analyzeGarmentPhoto(item.imageUrl);
+      visionDescription = await analyzeGarmentPhoto(item.imageUrl, item);
     } catch { /* fall back to metadata-only prompt */ }
   }
 
