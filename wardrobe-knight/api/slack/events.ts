@@ -3,6 +3,7 @@ import { receiver } from '../../bot/app.js';
 
 export const config = {
   runtime: 'nodejs',
+  maxDuration: 60,
 };
 
 export default async function handler(req: Request, res: Response): Promise<void> {
