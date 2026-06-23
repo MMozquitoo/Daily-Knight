@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import * as sheets from '../services/sheets.js';
 import { createProductPrediction, waitForProductPrediction } from '../services/product-image.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 60 };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -50,16 +50,15 @@ export default async function handler(req: Request, res: Response): Promise<void
     return;
   }
 
-  // Claude Vision + FLUX takes ~15s per item, default to 2
-  const limit = parseInt(req.query.limit as string) || 2;
-  const BATCH = Math.min(limit, 5);
+  // Claude Vision (~8s) + FLUX create (~3s) + poll (~15s) ≈ 26s per item
+  const limit = parseInt(req.query.limit as string) || 5;
+  const BATCH = Math.min(limit, 10);
   const batch = pending.slice(offset, offset + BATCH);
   const results: { id: string; status: string; productUrl?: string }[] = [];
   const startTime = Date.now();
 
-  // Process sequentially: vision analysis + prediction creation + polling per item
   for (const item of batch) {
-    if (Date.now() - startTime > 45_000) break;
+    if (Date.now() - startTime > 260_000) break;
 
     try {
       const predId = await createWithRetry(item);
