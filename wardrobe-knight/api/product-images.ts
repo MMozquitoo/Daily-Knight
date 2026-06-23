@@ -34,6 +34,8 @@ export default async function handler(req: Request, res: Response): Promise<void
   const regenerate = req.query.regenerate === 'true';
   const itemId = req.query.id as string | undefined;
 
+  const offset = parseInt(req.query.offset as string) || 0;
+
   let pending: typeof items;
   if (itemId) {
     pending = items.filter((i) => i.id === itemId);
@@ -43,15 +45,15 @@ export default async function handler(req: Request, res: Response): Promise<void
     pending = items.filter((i) => !i.productUrl);
   }
 
-  if (pending.length === 0) {
-    res.status(200).json({ ok: true, message: 'No items to process', total: items.length });
+  if (pending.length === 0 || offset >= pending.length) {
+    res.status(200).json({ ok: true, message: 'No items to process', total: items.length, remaining: 0 });
     return;
   }
 
   // Claude Vision + FLUX takes ~15s per item, default to 2
   const limit = parseInt(req.query.limit as string) || 2;
   const BATCH = Math.min(limit, 5);
-  const batch = pending.slice(0, BATCH);
+  const batch = pending.slice(offset, offset + BATCH);
   const results: { id: string; status: string; productUrl?: string }[] = [];
   const startTime = Date.now();
 
@@ -83,12 +85,14 @@ export default async function handler(req: Request, res: Response): Promise<void
   }
 
   const ok = results.filter((r) => r.status === 'ok').length;
-  const remaining = pending.length - batch.length + (batch.length - ok);
+  const nextOffset = offset + batch.length;
+  const remaining = pending.length - nextOffset;
   res.status(200).json({
     ok: true,
     processed: ok,
     errors: results.filter((r) => r.status.startsWith('error') || r.status === 'no credit').length,
-    remaining,
+    remaining: Math.max(0, remaining),
+    nextOffset,
     results,
   });
 }
