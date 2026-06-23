@@ -84,6 +84,7 @@ export function outfitMessage(
     },
     ...outfitImages.map((img) => ({
       type: 'image',
+      title: { type: 'plain_text' as const, text: img.alt },
       image_url: img.url,
       alt_text: img.alt,
     })),
