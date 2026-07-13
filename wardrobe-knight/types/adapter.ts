@@ -20,19 +20,29 @@ const COLOR_MAP: Record<string, PaletteColor> = {
   blanc: 'white', white: 'white', écru: 'white', crème: 'white',
   noir: 'black', black: 'black',
   'bleu marine': 'navy', marine: 'navy', navy: 'navy',
-  'bleu clair': 'blue', bleu: 'blue', blue: 'blue', ciel: 'blue',
+  'bleu pétrole': 'navy', pétrole: 'navy',
+  'bleu clair': 'blue', 'bleu ciel': 'blue', 'bleu roi': 'blue',
+  bleu: 'blue', blue: 'blue', ciel: 'blue', bleach: 'blue',
   gris: 'gray', gray: 'gray', anthracite: 'gray',
-  beige: 'beige', sable: 'beige', cream: 'beige',
+  beige: 'beige', sable: 'beige', cream: 'beige', mastic: 'beige',
   marron: 'brown', brown: 'brown', camel: 'brown', cognac: 'brown',
   chocolat: 'brown', 'marron foncé': 'brown', tan: 'brown',
   olive: 'olive', kaki: 'olive',
-  rouge: 'red', red: 'red', bordeaux: 'red', bourgogne: 'red',
-  vert: 'green', green: 'green', sapin: 'green',
+  rouge: 'red', red: 'red', bordeaux: 'red', bourgogne: 'red', corail: 'red',
+  vert: 'green', green: 'green', sapin: 'green', menthe: 'green',
 };
 
 function mapColor(couleur: string): PaletteColor {
   const normalized = couleur.toLowerCase().trim();
-  return COLOR_MAP[normalized] ?? 'gray';
+  const exact = COLOR_MAP[normalized];
+  if (exact) return exact;
+
+  // Longest key wins, so "bleu ciel" resolves before the bare "bleu"
+  const match = Object.keys(COLOR_MAP)
+    .filter((key) => normalized.includes(key))
+    .sort((a, b) => b.length - a.length)[0];
+
+  return match ? COLOR_MAP[match] : 'gray';
 }
 
 // --- Formality mapping ---
