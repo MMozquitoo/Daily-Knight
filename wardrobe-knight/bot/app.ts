@@ -20,6 +20,7 @@ import { askAdvisor } from '../services/advisor.js';
 import { generateTryOn } from '../services/tryon.js';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
+import { afterAck } from './defer.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
 import type { OutfitRecommendation } from '../types/outfit.js';
@@ -82,54 +83,65 @@ async function getOutfitContext() {
 }
 
 app.command('/outfit', async ({ ack, respond }) => {
+  // Ack now, work later — the outfit pipeline (agenda + sheet + weather + engine)
+  // can exceed Slack's 3s on a cold start; afterAck flushes the ack immediately and
+  // finishes under waitUntil so no "operation_timeout" flashes.
   await ack();
-  try {
-    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-    const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
-    lastRecommendation = recommendation;
-    await sheets.logWorn(todayStr(), {
-      top: recommendation.wear.top,
-      bottom: recommendation.wear.bottom,
-      shoes: recommendation.wear.shoes,
-      outerwear: recommendation.wear.outerwear,
-    });
-    await respond({ blocks: outfitMessage(recommendation, items, weather) as any });
-  } catch (err) {
-    await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+      lastRecommendation = recommendation;
+      await sheets.logWorn(todayStr(), {
+        top: recommendation.wear.top,
+        bottom: recommendation.wear.bottom,
+        shoes: recommendation.wear.shoes,
+        outerwear: recommendation.wear.outerwear,
+      });
+      await respond({ blocks: outfitMessage(recommendation, items, weather) as any });
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 app.command('/armoire', async ({ ack, respond }) => {
   await ack();
-  try {
-    const items = await sheets.getAll();
-    await respond({ blocks: wardrobeList(items) as any });
-  } catch (err) {
-    await respond(`:x: Erreur lors de la lecture de l'armoire : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const items = await sheets.getAll();
+      await respond({ blocks: wardrobeList(items) as any });
+    } catch (err) {
+      await respond(`:x: Erreur lors de la lecture de l'armoire : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 app.command('/agenda', async ({ ack, respond }) => {
   await ack();
-  try {
-    const agenda = await fetchTodayAgenda();
-    lastAgenda = agenda;
-    await respond(formatAgendaSlack(agenda));
-  } catch (err) {
-    await respond(`:x: Erreur lors de la lecture de l'agenda : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const agenda = await fetchTodayAgenda();
+      lastAgenda = agenda;
+      await respond(formatAgendaSlack(agenda));
+    } catch (err) {
+      await respond(`:x: Erreur lors de la lecture de l'agenda : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 app.command('/meteo', async ({ ack, respond }) => {
   await ack();
-  try {
-    const loc = getUserLocation();
-    const weather = await fetchWeather(loc.lat, loc.lon);
-    lastWeather = weather;
-    await respond(formatWeatherSlack(weather));
-  } catch (err) {
-    await respond(`:x: Erreur lors de la récupération de la météo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const loc = getUserLocation();
+      const weather = await fetchWeather(loc.lat, loc.lon);
+      lastWeather = weather;
+      await respond(formatWeatherSlack(weather));
+    } catch (err) {
+      await respond(`:x: Erreur lors de la récupération de la météo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 function isDM(message: { channel_type?: string }): boolean {
@@ -434,54 +446,60 @@ app.message(async ({ message, say }) => {
 
 app.action('regenerate_outfit', async ({ ack, respond, action }) => {
   await ack();
-  try {
-    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-    // The shown outfit rides in the button value, so regenerate works on any cold
-    // serverless instance — lastRecommendation module state is often null there,
-    // which used to make "regenerate" return the same outfit.
-    const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
-    const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
-    const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn);
-    lastRecommendation = recommendation;
-    await sheets.logWorn(todayStr(), {
-      top: recommendation.wear.top,
-      bottom: recommendation.wear.bottom,
-      shoes: recommendation.wear.shoes,
-      outerwear: recommendation.wear.outerwear,
-    });
-    await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
-  } catch (err) {
-    await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
+  afterAck(async () => {
+    try {
+      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+      // The shown outfit rides in the button value, so regenerate works on any cold
+      // serverless instance — lastRecommendation module state is often null there,
+      // which used to make "regenerate" return the same outfit.
+      const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
+      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn);
+      lastRecommendation = recommendation;
+      await sheets.logWorn(todayStr(), {
+        top: recommendation.wear.top,
+        bottom: recommendation.wear.bottom,
+        shoes: recommendation.wear.shoes,
+        outerwear: recommendation.wear.outerwear,
+      });
+      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 app.action('more_formal', async ({ ack, respond }) => {
   await ack();
-  try {
-    const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-    context.agenda = { ...context.agenda, highestFormality: 'formal' };
-    const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
-    lastRecommendation = recommendation;
-    await sheets.logWorn(todayStr(), {
-      top: recommendation.wear.top,
-      bottom: recommendation.wear.bottom,
-      shoes: recommendation.wear.shoes,
-      outerwear: recommendation.wear.outerwear,
-    });
-    await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
-  } catch (err) {
-    await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+      context.agenda = { ...context.agenda, highestFormality: 'formal' };
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+      lastRecommendation = recommendation;
+      await sheets.logWorn(todayStr(), {
+        top: recommendation.wear.top,
+        bottom: recommendation.wear.bottom,
+        shoes: recommendation.wear.shoes,
+        outerwear: recommendation.wear.outerwear,
+      });
+      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 app.action('view_agenda', async ({ ack, respond }) => {
   await ack();
-  try {
-    const agenda = lastAgenda ?? await fetchTodayAgenda();
-    await respond(formatAgendaSlack(agenda));
-  } catch (err) {
-    await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-  }
+  afterAck(async () => {
+    try {
+      const agenda = lastAgenda ?? await fetchTodayAgenda();
+      await respond(formatAgendaSlack(agenda));
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
 });
 
 const loadingModal = (text: string) => ({
