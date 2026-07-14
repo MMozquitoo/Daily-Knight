@@ -43,6 +43,44 @@ function classifyEvent(title: string): EventTag {
   return 'work'; // default
 }
 
+/** A Google Calendar event as the API returns it (only the fields we read) */
+interface RawEvent {
+  id?: string | null;
+  summary?: string | null;
+  location?: string | null;
+  start?: { dateTime?: string | null; date?: string | null } | null;
+  end?: { dateTime?: string | null; date?: string | null } | null;
+}
+
+/**
+ * Map a raw event to ours, handling BOTH timed and all-day events.
+ *
+ * Timed events carry start.dateTime; all-day events carry start.date only. The
+ * two fetchers used to filter on dateTime, silently dropping every all-day event —
+ * and an all-day "Voyage → Nice" or "Entretien client" is exactly what should
+ * drive formality and destination. Returns null for an event with no title/date.
+ */
+function toAgendaEvent(e: RawEvent): AgendaEvent | null {
+  if (!e.summary) return null;
+  const start = e.start?.dateTime ?? e.start?.date;
+  if (!start) return null;
+
+  return {
+    id: e.id ?? '',
+    title: e.summary,
+    startTime: start,
+    endTime: e.end?.dateTime ?? e.end?.date ?? '',
+    tag: classifyEvent(e.summary),
+    location: e.location ?? undefined,
+  };
+}
+
+/** The calendar date an event belongs to — dateTime or all-day date, first 10 chars */
+function eventDate(e: RawEvent): string | undefined {
+  const start = e.start?.dateTime ?? e.start?.date;
+  return start?.slice(0, 10);
+}
+
 const TAG_PRIORITY: Record<EventTag, number> = {
   casual: 0,
   travel: 1,
@@ -109,16 +147,9 @@ export async function fetchTodayAgenda(): Promise<AgendaSummary> {
     orderBy: 'startTime',
   });
 
-  const events: AgendaEvent[] = (res.data.items ?? [])
-    .filter((e) => e.summary && e.start?.dateTime)
-    .map((e) => ({
-      id: e.id ?? '',
-      title: e.summary ?? '',
-      startTime: e.start?.dateTime ?? '',
-      endTime: e.end?.dateTime ?? '',
-      tag: classifyEvent(e.summary ?? ''),
-      location: e.location ?? undefined,
-    }));
+  const events = (res.data.items ?? [])
+    .map(toAgendaEvent)
+    .filter((e): e is AgendaEvent => e !== null);
 
   return buildSummary(events);
 }
@@ -140,25 +171,23 @@ export async function fetchWeekAgenda(days: number = 7): Promise<Map<string, Age
     orderBy: 'startTime',
   });
 
+  // Bucket keys must use the same LOCAL calendar dates the events are keyed by, or
+  // the range's edges drift by a day and that day's events fall on the floor.
+  const localDate = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   const byDate = new Map<string, AgendaEvent[]>();
   for (let i = 0; i < days; i++) {
     const d = new Date(startOfDay.getTime() + i * 24 * 60 * 60 * 1000);
-    byDate.set(d.toISOString().slice(0, 10), []);
+    byDate.set(localDate(d), []);
   }
 
-  for (const e of res.data.items ?? []) {
-    if (!e.summary || !e.start?.dateTime) continue;
-    const date = e.start.dateTime.slice(0, 10);
-    const events = byDate.get(date);
-    if (events) {
-      events.push({
-        id: e.id ?? '',
-        title: e.summary ?? '',
-        startTime: e.start.dateTime ?? '',
-        endTime: e.end?.dateTime ?? '',
-        tag: classifyEvent(e.summary ?? ''),
-      });
-    }
+  for (const raw of res.data.items ?? []) {
+    const event = toAgendaEvent(raw);
+    const date = eventDate(raw);
+    if (!event || !date) continue;
+    // location is carried through toAgendaEvent, so the week can dress for a trip
+    byDate.get(date)?.push(event);
   }
 
   const result = new Map<string, AgendaSummary>();

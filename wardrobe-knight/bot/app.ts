@@ -279,6 +279,11 @@ app.event('message', async ({ event, say }) => {
 });
 
 app.message(async ({ message, say }) => {
+  // A photo uploaded WITH a caption is delivered to both this handler and the
+  // file_share event handler above. Let that one own it, or the caption gets
+  // processed twice — appending the same item once from the image and once from
+  // the text.
+  if ((message as { subtype?: string }).subtype === 'file_share') return;
   if (message.type !== 'message' || !('text' in message) || !message.text) return;
 
   const text = message.text;
@@ -426,13 +431,15 @@ app.message(async ({ message, say }) => {
   }
 });
 
-app.action('regenerate_outfit', async ({ ack, respond }) => {
+app.action('regenerate_outfit', async ({ ack, respond, action }) => {
   await ack();
   try {
     const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-    const excludeIds = lastRecommendation
-      ? [lastRecommendation.wear.top, lastRecommendation.wear.bottom].filter(Boolean) as string[]
-      : [];
+    // The shown outfit rides in the button value, so regenerate works on any cold
+    // serverless instance — lastRecommendation module state is often null there,
+    // which used to make "regenerate" return the same outfit.
+    const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
+    const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
     const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn);
     lastRecommendation = recommendation;
     await sheets.logWorn(todayStr(), {

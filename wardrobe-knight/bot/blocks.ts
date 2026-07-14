@@ -96,11 +96,15 @@ export function outfitMessage(
           type: 'button',
           text: { type: 'plain_text', text: ':arrows_counterclockwise: Changer de tenue', emoji: true },
           action_id: 'regenerate_outfit',
+          // Carry the shown outfit in the button so regenerate works on any cold
+          // serverless instance, not only the one that posted the message.
+          value: [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes].filter(Boolean).join(','),
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: ':arrow_up: Plus formel', emoji: true },
           action_id: 'more_formal',
+          value: [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes].filter(Boolean).join(','),
         },
         {
           type: 'button',
@@ -252,6 +256,11 @@ export function wardrobeList(items: ClothingItem[]): object[] {
     { type: 'header', text: { type: 'plain_text', text: ':closet: Ton armoire', emoji: true } },
   ];
 
+  // Slack rejects the whole message if any one text object exceeds 3000 chars. With
+  // 117 items the "HAUTS" group alone blows past that, so each category's lines are
+  // split into sub-3000-char section blocks instead of one giant field.
+  const MAX_TEXT = 2900;
+
   for (const [cat, catItems] of grouped) {
     const emoji = catEmoji[cat] ?? ':small_blue_diamond:';
     const label = catLabel[cat] ?? cat.toUpperCase();
@@ -261,10 +270,17 @@ export function wardrobeList(items: ClothingItem[]): object[] {
       const name = `${i.categorie} ${i.sousCategorie}`.trim();
       return `• ${i.id} — *${name}*${status}${photo} (${i.couleur}, ${i.marque}, f${i.formalite})`;
     });
-    blocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: `${emoji} *${label}*\n${lines.join('\n')}` },
-    });
+
+    let header = `${emoji} *${label}*`;
+    let buffer = header;
+    for (const line of lines) {
+      if (buffer.length + 1 + line.length > MAX_TEXT) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
+        buffer = `${header} _(suite)_`;
+      }
+      buffer += `\n${line}`;
+    }
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
   }
 
   blocks.push({

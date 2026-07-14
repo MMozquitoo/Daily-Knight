@@ -33,16 +33,23 @@ export async function fetchWeatherForecast(lat: number, lon: number, days: numbe
   const data = await res.json();
   const daily = data.daily;
 
-  return Array.from({ length: days }, (_, i) => ({
-    temperature: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
-    feelsLike: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
-    rainProbability: daily.precipitation_probability_max[i] ?? 0,
-    condition: weatherCodeToCondition(daily.weather_code[i]),
-    wind: Math.round(daily.wind_speed_10m_max[i] ?? 0),
-    tempMax: Math.round(daily.temperature_2m_max[i]),
-    tempMin: Math.round(daily.temperature_2m_min[i]),
-    date: daily.time[i],
-  }));
+  // Open-Meteo caps forecast_days at 16 and can return short arrays; only build
+  // days that actually have a max AND min, so a missing entry never becomes NaN
+  // in the plan.
+  const available = Math.min(days, daily?.time?.length ?? 0);
+
+  return Array.from({ length: available }, (_, i) => i)
+    .filter((i) => daily.temperature_2m_max[i] != null && daily.temperature_2m_min[i] != null)
+    .map((i) => ({
+      temperature: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
+      feelsLike: Math.round((daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2),
+      rainProbability: daily.precipitation_probability_max[i] ?? 0,
+      condition: weatherCodeToCondition(daily.weather_code[i]),
+      wind: Math.round(daily.wind_speed_10m_max[i] ?? 0),
+      tempMax: Math.round(daily.temperature_2m_max[i]),
+      tempMin: Math.round(daily.temperature_2m_min[i]),
+      date: daily.time[i],
+    }));
 }
 
 export async function fetchWeather(lat: number, lon: number): Promise<DayWeather> {
@@ -139,11 +146,17 @@ export async function geocodeBest(
   return { lat: best.latitude, lon: best.longitude, name: best.name };
 }
 
-/** Get location from environment variables */
+/** Get location from environment variables (defaults to Paris) */
 export function getUserLocation(): { lat: number; lon: number } {
+  // A malformed USER_LATITUDE would parseFloat to NaN and send Open-Meteo a broken
+  // coordinate; fall back to Paris rather than propagate NaN.
+  const num = (value: string | undefined, fallback: number): number => {
+    const parsed = parseFloat(value ?? '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
   return {
-    lat: parseFloat(process.env.USER_LATITUDE ?? '48.8566'),
-    lon: parseFloat(process.env.USER_LONGITUDE ?? '2.3522'),
+    lat: num(process.env.USER_LATITUDE, 48.8566),
+    lon: num(process.env.USER_LONGITUDE, 2.3522),
   };
 }
 

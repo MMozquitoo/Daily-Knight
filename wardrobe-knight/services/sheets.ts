@@ -301,14 +301,37 @@ export async function logWorn(
   itemIds: { top?: string; bottom?: string; shoes?: string; outerwear?: string },
 ): Promise<void> {
   await ensureHistorySheet();
-  const sheets = getSheets();
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: sheetId(),
-    range: HISTORY_RANGE,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: [[date, itemIds.top ?? '', itemIds.bottom ?? '', itemIds.shoes ?? '', itemIds.outerwear ?? '']],
-    },
+  return serialise(async () => {
+    const sheets = getSheets();
+    const row = [date, itemIds.top ?? '', itemIds.bottom ?? '', itemIds.shoes ?? '', itemIds.outerwear ?? ''];
+
+    // Upsert on date. logWorn fires on every /outfit AND every "regenerate"/"more
+    // formal" click, so appending would write a fresh "worn today" row per click —
+    // browsing four alternatives then puts a dozen never-worn items on cooldown.
+    // One row per day, overwritten, keeps the record to the outfit last shown.
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId(),
+      range: HISTORY_RANGE,
+    });
+    const rows = res.data.values ?? [];
+    const existing = rows.findIndex((r, i) => i > 0 && r[0] === date);
+
+    if (existing >= 0) {
+      const rowNumber = existing + 1; // 1-based
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId(),
+        range: `${HISTORY_SHEET}!A${rowNumber}:E${rowNumber}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [row] },
+      });
+    } else {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: sheetId(),
+        range: HISTORY_RANGE,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [row] },
+      });
+    }
   });
 }
 
