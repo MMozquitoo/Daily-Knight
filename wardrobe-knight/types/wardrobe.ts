@@ -83,7 +83,11 @@ export type PaletteColor =
   | 'olive'
   | 'red'
   | 'blue'
-  | 'green';
+  | 'green'
+  | 'yellow'
+  | 'pink'
+  | 'purple'
+  | 'orange';
 
 /** Weather suitability range — derived from ClothingItem fields */
 export interface WeatherRange {

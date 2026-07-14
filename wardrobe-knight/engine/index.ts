@@ -158,9 +158,12 @@ export function swapLayer(
   context: DailyContext,
   current: OutfitRecommendation,
   layer: OutfitLayer,
+  recentlyWorn?: Map<string, number>,
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context);
+  // Honour the cooldown here too, or swapping can surface yesterday's item that
+  // generateOutfit/regenerateOutfit would have suppressed.
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
   const lockedLayerIds: Record<string, string | undefined> = {
     top: current.wear.top,
     bottom: current.wear.bottom,

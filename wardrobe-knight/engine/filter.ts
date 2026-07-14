@@ -7,7 +7,7 @@
 
 import type { DailyContext } from '../types/context.js';
 import type { LayerCategory, WardrobeItem } from '../types/wardrobe.js';
-import { dayTemperature, getFormalityDistance, getRequiredFormality, isRainyDay, isWindyDay } from './utils.js';
+import { dayTemperature, getFormalityDistance, getRequiredFormality, isRainyDay, isWindyDay, needsOuterwear } from './utils.js';
 
 /** A garment a few degrees outside its band is uncomfortable, not unwearable */
 const TEMP_TOLERANCE = 3;
@@ -64,5 +64,10 @@ export function filterItems(items: WardrobeItem[], context: DailyContext): Wardr
     return true;
   });
 
-  return REQUIRED_LAYERS.reduce((acc, layer) => topUpLayer(acc, items, layer, temp), kept);
+  // Top up top/bottom/shoes so a required layer is never empty. Add outerwear too
+  // when the day demands it: a freezing formal morning filtered out every blazer
+  // (heat band) and every casual coat (formality), leaving the validator to reject
+  // every outfit for a missing protection layer. A slightly-off coat beats none.
+  const layers = needsOuterwear(context) ? [...REQUIRED_LAYERS, 'outerwear' as LayerCategory] : REQUIRED_LAYERS;
+  return layers.reduce((acc, layer) => topUpLayer(acc, items, layer, temp), kept);
 }

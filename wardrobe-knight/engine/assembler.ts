@@ -47,6 +47,8 @@ export function assembleOutfit(
           !options.excludedItemIds?.includes(entry.item.id),
       );
 
+  // One of each kind — never two belts or two hats (matches findValidOutfit)
+  const seenTypes = new Set<string>();
   const accessories = scoredItems
     .filter(
       (entry) =>
@@ -54,6 +56,11 @@ export function assembleOutfit(
         entry.score >= ACCESSORY_SCORE_MIN &&
         !options.excludedItemIds?.includes(entry.item.id),
     )
+    .filter((entry) => {
+      if (seenTypes.has(entry.item.type)) return false;
+      seenTypes.add(entry.item.type);
+      return true;
+    })
     .slice(0, 2)
     .map((entry) => entry.item);
 

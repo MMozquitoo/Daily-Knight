@@ -61,7 +61,10 @@ export function temperatureRange(context: DailyContext): number {
 }
 
 export function isColdDay(context: DailyContext): boolean {
-  return dayTemperature(context) < 18 || context.weather.feelsLike < 16;
+  // Judge the day's high only. feelsLike is the morning reading, and letting it in
+  // put a blazer on a day that peaked at 27°C just because it was 9°C at dawn — the
+  // cool morning is meant to be handled by a carried layer, not by dressing warm.
+  return dayTemperature(context) < 18;
 }
 
 export function isHotDay(context: DailyContext): boolean {
@@ -82,7 +85,11 @@ export function isWindyDay(context: DailyContext): boolean {
 }
 
 export function needsOuterwear(context: DailyContext): boolean {
-  return isColdDay(context) || isRainyDay(context) || isWindyDay(context);
+  // Cold always wants a layer. Rain and wind want one too — but not when it's hot:
+  // the answer to a 34°C downpour is an umbrella (see carry), not a blazer.
+  if (isColdDay(context)) return true;
+  if (isHotDay(context)) return false;
+  return isRainyDay(context) || isWindyDay(context);
 }
 
 export function getTemperatureSwing(context: DailyContext): number {

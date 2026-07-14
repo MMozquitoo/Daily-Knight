@@ -32,6 +32,11 @@ const COLOR_MAP: Record<string, PaletteColor> = {
   olive: 'olive', kaki: 'olive',
   rouge: 'red', red: 'red', bordeaux: 'red', bourgogne: 'red', corail: 'red',
   vert: 'green', green: 'green', sapin: 'green', menthe: 'green',
+  turquoise: 'blue', cyan: 'blue',
+  jaune: 'yellow', yellow: 'yellow', moutarde: 'yellow', fluo: 'yellow',
+  rose: 'pink', pink: 'pink', poudré: 'pink',
+  violet: 'purple', purple: 'purple', mauve: 'purple', lilas: 'purple', prune: 'purple',
+  orange: 'orange', abricot: 'orange', rouille: 'orange',
 };
 
 function mapColor(couleur: string): PaletteColor {
