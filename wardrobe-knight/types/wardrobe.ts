@@ -55,6 +55,8 @@ export type ClothingType =
   | 'vest'
   | 'hat'
   | 'scarf'
+  | 'belt'
+  | 'tie'
   | 'bag'
   | 'watch';
 
@@ -129,6 +131,8 @@ export const CATEGORY_PREFIXES: Record<string, string> = {
   vest: 'VE',
   hat: 'GO',
   scarf: 'BU',
+  belt: 'CE',
+  tie: 'CR',
   bag: 'MA',
   watch: 'RE',
 };
@@ -139,7 +143,7 @@ export function categoryFromSheet(categorie: string): LayerCategory {
   if (['jeans', 'pants', 'chino', 'shorts', 'skirt'].includes(lower)) return 'bottom';
   if (['shoes', 'boots', 'sneakers', 'sandals'].includes(lower)) return 'shoes';
   if (['jacket', 'coat', 'blazer', 'vest'].includes(lower)) return 'outerwear';
-  if (['hat', 'scarf', 'bag', 'watch'].includes(lower)) return 'accessories';
+  if (['hat', 'scarf', 'belt', 'tie', 'bag', 'watch'].includes(lower)) return 'accessories';
   return 'top'; // shirt, tshirt, t-shirt, sweater, hoodie, polo, etc.
 }
 
@@ -167,6 +171,8 @@ export function typeFromSheet(categorie: string, sousCategorie: string): Clothin
   if (lower === 't-shirt' || lower === 'tshirt') return 'tshirt';
   if (lower === 'hat') return 'hat';
   if (lower === 'scarf') return 'scarf';
+  if (lower === 'belt') return 'belt';
+  if (lower === 'tie') return 'tie';
   if (lower === 'bag') return 'bag';
   if (lower === 'watch') return 'watch';
   return 'shirt';
