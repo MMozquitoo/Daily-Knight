@@ -42,7 +42,7 @@ function topUpLayer(
   if (have.length >= MIN_PER_LAYER) return kept;
 
   const missing = all
-    .filter((item) => item.category === layer && !kept.includes(item))
+    .filter((item) => item.category === layer && item.availability === 'available' && !kept.includes(item))
     .sort((a, b) => tempMiss(a, temp) - tempMiss(b, temp))
     .slice(0, MIN_PER_LAYER - have.length);
 

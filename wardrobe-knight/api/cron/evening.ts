@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { detectTrips } from '../../services/calendar.js';
+import { todayStr, localDateStr } from '../../services/dates.js';
 import { geocodeCity, fetchWeatherForecast } from '../../services/weather.js';
 import { planWeek } from '../../services/planner.js';
 import * as sheets from '../../services/sheets.js';
@@ -13,9 +14,7 @@ export const config = { runtime: 'nodejs', maxDuration: 60 };
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 const LAUNDRY_INTERVAL_DAYS = 3;
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+
 
 function itemLabel(item: ClothingItem): string {
   return `${item.id} ${item.categorie} ${item.sousCategorie} ${item.couleur}${item.marque ? ` (${item.marque})` : ''}`;
@@ -105,8 +104,8 @@ export default async function handler(req: Request, res: Response): Promise<void
     const trips = await detectTrips(3);
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-    const dayAfterStr = new Date(tomorrow.getTime() + 86400000).toISOString().slice(0, 10);
+    const tomorrowStr = localDateStr(tomorrow);
+    const dayAfterStr = localDateStr(new Date(tomorrow.getTime() + 86400000));
 
     for (const trip of trips) {
       if (trip.startDate !== tomorrowStr && trip.startDate !== dayAfterStr) continue;

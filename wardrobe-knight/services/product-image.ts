@@ -112,14 +112,25 @@ function buildProductPrompt(item: ClothingItem, visionDescription?: string | nul
   ].join(' ');
 }
 
-function extractUrl(output: unknown): string | null {
-  if (typeof output === 'string') return output;
-  if (Array.isArray(output) && typeof output[0] === 'string') return output[0];
-  if (output && typeof output === 'object' && 'url' in (output as any)) {
-    const u = (output as any).url;
-    return typeof u === 'function' ? u() : u;
+/** A FileOutput exposes url() (a function) or url (a string); pull the string out */
+function urlOf(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'url' in (value as any)) {
+    const u = (value as any).url;
+    return typeof u === 'function' ? String(u()) : String(u);
   }
   return null;
+}
+
+/**
+ * Replicate's client (useFileOutput on by default) now returns FileOutput objects
+ * from run(), not URL strings — often as an array. The old code only handled a
+ * string, an array of strings, or a lone object, so generateProductImage() got
+ * null on a successful, paid generation. Handle the array-of-FileOutput case too.
+ */
+function extractUrl(output: unknown): string | null {
+  if (Array.isArray(output)) return output.length ? urlOf(output[0]) : null;
+  return urlOf(output);
 }
 
 export async function generateProductImage(item: ClothingItem): Promise<string | null> {

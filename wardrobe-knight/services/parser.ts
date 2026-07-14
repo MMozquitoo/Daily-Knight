@@ -8,6 +8,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ClothingItem } from '../types/wardrobe.js';
 
+/** Strip a ```json … ``` fence if the model wrapped its JSON despite instructions */
+function stripFence(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return (fenced ? fenced[1] : text).trim();
+}
+
+
 const SCHEMA_DESCRIPTION = `The user wants to add a clothing item. Extract these fields from their message (in French).
 Return a JSON object with these keys. Use null for fields you cannot infer.
 
@@ -68,7 +75,7 @@ export async function parseAddItem(userMessage: string): Promise<ParsedItem> {
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '{}';
 
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(stripFence(text));
     return {
       categorie: parsed.categorie ?? undefined,
       sousCategorie: parsed.sousCategorie ?? undefined,
@@ -140,7 +147,7 @@ export async function parseAddItemFromImage(
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '{}';
 
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(stripFence(text));
     return {
       categorie: parsed.categorie ?? undefined,
       sousCategorie: parsed.sousCategorie ?? undefined,

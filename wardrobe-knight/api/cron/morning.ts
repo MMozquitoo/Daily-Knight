@@ -10,6 +10,7 @@ import { getPlannedOutfit } from '../../services/planner.js';
 import { fetchWeather, getUserLocation } from '../../services/weather.js';
 import { resolveDayPlace } from '../../services/destination.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
+import { todayStr, daysAgo } from '../../services/dates.js';
 import { outfitMessage } from '../../bot/blocks.js';
 
 export const config = {
@@ -19,18 +20,14 @@ export const config = {
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+
 
 function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
   const map = new Map<string, number>();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
 
   for (const entry of history) {
-    const entryDate = new Date(entry.date + 'T00:00:00');
-    const daysDiff = Math.round((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+    // Anchored to Europe/Paris, so it agrees with how todayStr() writes the log
+    const daysDiff = daysAgo(entry.date);
     for (const id of [entry.top, entry.bottom, entry.shoes, entry.outerwear]) {
       if (!id) continue;
       const existing = map.get(id);
