@@ -13,6 +13,7 @@ import { google } from 'googleapis';
 import type { ClothingItem } from '../types/wardrobe.js';
 import { CATEGORY_PREFIXES } from '../types/wardrobe.js';
 import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
+import { daysAgo } from './dates.js';
 
 const SHEET_NAME = 'Armoire';
 const RANGE = `${SHEET_NAME}!A:R`; // 18 columns A–R (P = image URL, Q = try-on URL, R = product image URL)
@@ -357,14 +358,11 @@ export async function getWornRecently(days: number = 7): Promise<WornEntry[]> {
   const rows = res.data.values ?? [];
   if (rows.length <= 1) return [];
 
-  const today = new Date();
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
-
+  // The log stores Europe/Paris dates, so the window has to be measured the same
+  // way — a UTC cutoff would slip the 7-day edge by a day around midnight.
   return rows
     .slice(1)
-    .filter((row) => row[0] && row[0] >= cutoffStr)
+    .filter((row) => row[0] && daysAgo(row[0]) <= days)
     .map((row) => ({
       date: row[0],
       top: row[1] || undefined,

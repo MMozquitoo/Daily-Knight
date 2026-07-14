@@ -82,21 +82,23 @@ function findValidOutfit(
     : [undefined];
   if (outerwearOptions.length === 0) outerwearOptions.push(undefined);
 
-  // One of each kind. Taking the top two by score alone put two baseball caps on
-  // the same head.
+  // One of each kind, ranked. Accessories are chosen to FIT the finished outfit —
+  // they never gate the search. A belt whose leather clashes with the shoes should
+  // simply be left off, not invalidate every top/bottom/shoes combination and drop
+  // the whole thing to the greedy fallback.
   const seenTypes = new Set<string>();
-  const accessories = scoredItems
+  const accessoryCandidates = scoredItems
     .filter((entry) => entry.item.category === 'accessories' && !excluded.has(entry.item.id))
     .filter((entry) => {
       if (seenTypes.has(entry.item.type)) return false;
       seenTypes.add(entry.item.type);
       return true;
     })
-    .slice(0, 2)
     .map((entry) => entry.item);
 
   let best: { outfit: RawOutfit; total: number } | null = null;
 
+  // Search on primaries only — accessories are added after a winner is chosen
   for (const top of tops) {
     for (const bottom of bottoms) {
       for (const shoe of shoes) {
@@ -106,7 +108,7 @@ function findValidOutfit(
             bottom: bottom.item,
             shoes: shoe.item,
             outerwear: outer?.item,
-            accessories,
+            accessories: [],
           };
 
           if (!validateOutfit(outfit, context).valid) continue;
@@ -120,7 +122,16 @@ function findValidOutfit(
     }
   }
 
-  if (best) return best.outfit;
+  if (best) {
+    // Add up to two accessories, each only if it keeps the outfit conflict-free
+    const accessories: WardrobeItem[] = [];
+    for (const candidate of accessoryCandidates) {
+      if (accessories.length >= 2) break;
+      const trial = { ...best.outfit, accessories: [...accessories, candidate] };
+      if (evaluateHarmony(trial).conflicts.length === 0) accessories.push(candidate);
+    }
+    return { ...best.outfit, accessories };
+  }
 
   // Nothing survived the rules — fall back to the old greedy pick so the user gets
   // *something*, rather than an error at 7am.

@@ -109,7 +109,10 @@ export async function planWeek(days: number = 7, withTryOn: boolean = false): Pr
 
   const planned: PlannedOutfit[] = [];
 
-  for (let i = 0; i < days; i++) {
+  // Iterate the forecast array itself — it can now be shorter than `days` (the
+  // weather service drops days with missing highs/lows instead of emitting NaN),
+  // so indexing 0..days would read past the end and throw on forecast.date.
+  for (let i = 0; i < forecasts.length; i++) {
     const forecast = forecasts[i];
     const dateStr = forecast.date ?? new Date(today.getTime() + i * 86400000).toISOString().slice(0, 10);
     const agenda = weekAgenda.get(dateStr) ?? {
