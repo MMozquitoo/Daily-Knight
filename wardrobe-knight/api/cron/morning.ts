@@ -89,17 +89,20 @@ export default async function handler(req: Request, res: Response): Promise<void
       recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
     }
 
+    // Deliver first, then log. If the post fails, the day should not be recorded
+    // as "worn" — otherwise the outfit that was never shown poisons tomorrow's
+    // cooldown, and the user got nothing to wear either way.
+    await slack.chat.postMessage({
+      channel: SLACK_USER_ID,
+      text: ':shield: Bonjour ! Voici ta tenue du jour :',
+      blocks: outfitMessage(recommendation, items, weather) as any,
+    });
+
     await sheets.logWorn(todayStr(), {
       top: recommendation.wear.top,
       bottom: recommendation.wear.bottom,
       shoes: recommendation.wear.shoes,
       outerwear: recommendation.wear.outerwear,
-    });
-
-    await slack.chat.postMessage({
-      channel: SLACK_USER_ID,
-      text: ':shield: Bonjour ! Voici ta tenue du jour :',
-      blocks: outfitMessage(recommendation, items, weather) as any,
     });
 
     // Check for pending follow-ups and send reminders

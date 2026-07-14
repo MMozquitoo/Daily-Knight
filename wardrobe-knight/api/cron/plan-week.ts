@@ -3,7 +3,8 @@ import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { planWeek } from '../../services/planner.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 300 };
+// Hobby caps at 60s (vercel.json pins api/** to 60); 300 was never honoured.
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 

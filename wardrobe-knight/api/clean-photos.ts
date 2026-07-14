@@ -4,7 +4,11 @@ import Replicate from 'replicate';
 import * as sheets from '../services/sheets.js';
 import { uploadImageFromUrl } from '../services/blob.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 300 };
+// Hobby caps at 60s (vercel.json pins api/** to 60); 300 was killed mid-write.
+export const config = { runtime: 'nodejs', maxDuration: 60 };
+
+const CLEAN_MODEL = 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003';
+const TIME_BUDGET_MS = 50_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -23,77 +27,60 @@ export default async function handler(req: Request, res: Response): Promise<void
     return;
   }
 
-  const BATCH = 3;
-  const batch = pending.slice(0, BATCH);
   const results: { id: string; status: string; cleanUrl?: string }[] = [];
+  const startTime = Date.now();
 
-  // Create all predictions
-  const predictions: { predId: string; itemId: string }[] = [];
+  // One at a time: create → poll → upload to Blob → persist, before the next. The
+  // old code created all three then polled, so a 60s kill kept the paid prediction
+  // and lost the result. Per-item persistence saves whatever finishes in the window.
+  for (const item of pending) {
+    if (Date.now() - startTime > TIME_BUDGET_MS) break;
 
-  for (const item of batch) {
     try {
       const prediction = await replicate.predictions.create({
-        version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
+        version: CLEAN_MODEL,
         input: { image: item.imageUrl },
       });
-      predictions.push({ predId: prediction.id, itemId: item.id });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'unknown';
-      if (msg.includes('429')) {
-        // Wait and retry once
-        await sleep(12000);
-        try {
-          const prediction = await replicate.predictions.create({
-            version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
-            input: { image: item.imageUrl },
-          });
-          predictions.push({ predId: prediction.id, itemId: item.id });
-        } catch {
-          results.push({ id: item.id, status: `error: ${msg.slice(0, 80)}` });
-        }
-      } else {
-        results.push({ id: item.id, status: `error: ${msg.slice(0, 80)}` });
-      }
-    }
-  }
 
-  // Poll all predictions in parallel
-  const pollResults = await Promise.allSettled(
-    predictions.map(async (p) => {
-      const start = Date.now();
-      while (Date.now() - start < 60_000) {
-        const pred = await replicate.predictions.get(p.predId);
+      let cleanUrl: string | null = null;
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 40_000) {
+        const pred = await replicate.predictions.get(prediction.id);
         if (pred.status === 'succeeded') {
           const output = pred.output;
-          const url = typeof output === 'string' ? output : Array.isArray(output) ? output[0] : null;
-          return { itemId: p.itemId, cleanUrl: url };
+          cleanUrl = typeof output === 'string' ? output : Array.isArray(output) ? output[0] : null;
+          break;
         }
         if (pred.status === 'failed' || pred.status === 'canceled') {
           throw new Error(`${pred.status}: ${pred.error}`);
         }
         await sleep(2000);
       }
-      throw new Error('timeout');
-    }),
-  );
 
-  for (const r of pollResults) {
-    if (r.status === 'fulfilled' && r.value.cleanUrl) {
-      const permanentUrl = await uploadImageFromUrl(r.value.cleanUrl, `clean/${r.value.itemId}.png`);
-      await sheets.update(r.value.itemId, { tryonUrl: permanentUrl } as any);
-      results.push({ id: r.value.itemId, status: 'ok', cleanUrl: permanentUrl });
-    } else if (r.status === 'rejected') {
-      results.push({ id: 'unknown', status: `error: ${r.reason?.message?.slice(0, 80) ?? 'failed'}` });
+      if (cleanUrl) {
+        const permanentUrl = await uploadImageFromUrl(cleanUrl, `clean/${item.id}.png`);
+        await sheets.update(item.id, { tryonUrl: permanentUrl } as any);
+        results.push({ id: item.id, status: 'ok', cleanUrl: permanentUrl });
+      } else {
+        results.push({ id: item.id, status: 'skipped' });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      if (msg.includes('402')) {
+        results.push({ id: item.id, status: 'no credit' });
+        break;
+      }
+      results.push({ id: item.id, status: `error: ${msg.slice(0, 80)}` });
     }
   }
 
   const ok = results.filter((r) => r.status === 'ok').length;
-  const remaining = pending.length - batch.length;
+  const remaining = pending.length - results.filter((r) => r.status === 'ok' || r.status === 'skipped').length;
   res.status(200).json({
     ok: true,
     processed: ok,
-    errors: results.filter((r) => r.status.startsWith('error')).length,
-    remaining: remaining > 0 ? `${remaining} left — call again` : 0,
+    errors: results.filter((r) => r.status.startsWith('error') || r.status === 'no credit').length,
+    remaining: Math.max(0, remaining),
     results,
   });
 }

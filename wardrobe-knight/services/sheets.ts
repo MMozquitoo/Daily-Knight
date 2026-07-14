@@ -274,7 +274,13 @@ export interface WornEntry {
   outerwear?: string;
 }
 
+// The history tab is created once; after that this always threw "already exists"
+// and swallowed it — a wasted round-trip on every logWorn AND getWornRecently, so
+// two per /outfit, straight onto the 3s Slack budget. Remember it exists.
+let historySheetReady = false;
+
 async function ensureHistorySheet(): Promise<void> {
+  if (historySheetReady) return;
   const sheets = getSheets();
   try {
     await sheets.spreadsheets.batchUpdate({
@@ -289,8 +295,12 @@ async function ensureHistorySheet(): Promise<void> {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [['Date', 'Top', 'Bottom', 'Shoes', 'Outerwear']] },
     });
+    historySheetReady = true;
   } catch (err: any) {
-    if (err?.message?.includes('already exists')) return;
+    if (err?.message?.includes('already exists')) {
+      historySheetReady = true;
+      return;
+    }
     throw err;
   }
 }
