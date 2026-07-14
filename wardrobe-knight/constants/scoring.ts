@@ -38,7 +38,20 @@ export const WEATHER_BONUSES = {
   outerwearOnColdDay: 8,
   closedShoesOnWetDay: 6,
   hotDayHeavyPenalty: -8,
+  /** Shorts come first once it is genuinely warm — the owner's rule */
+  shortsOnHotDay: 14,
+  /** …and long trousers stop being the obvious answer */
+  longLegsOnHotDay: -6,
+  /** Boots on a hot day are a mistake even if the leather says "toutes saisons" */
+  bootsOnHotDay: -12,
 } as const;
+
+/** A worn-out garment still gets worn — it just loses to a better one */
+export const CONDITION_MULTIPLIER: Record<string, number> = {
+  neuf: 1,
+  bon: 1,
+  'usé': 0.55,
+};
 
 export const FORMALITY_SCORES = {
   exact: 30,

@@ -5,8 +5,10 @@
  * All mapping logic is centralized here.
  */
 
+import { COMFORT_BAND, adjustBand } from '../constants/warmth.js';
 import type {
   ClothingItem,
+  ClothingType,
   FormalityLevel,
   PaletteColor,
   UsageContext,
@@ -72,43 +74,17 @@ function deriveContexts(niveau: string, formalite: number): UsageContext[] {
   return ['casual', 'travel'];
 }
 
-// --- Weather derivation from saison + matière ---
+// --- Weather derivation from the garment itself ---
 
-function deriveWeather(item: ClothingItem): { minTemp: number; maxTemp: number; rainOk: boolean } {
-  const saison = item.saison.toLowerCase();
+function deriveWeather(item: ClothingItem, type: ClothingType): { minTemp: number; maxTemp: number; rainOk: boolean } {
+  // The band comes from what the garment IS. Saison and Matière only nudge it —
+  // see constants/warmth.ts for why deriving it from Saison alone was wrong.
+  const band = adjustBand(COMFORT_BAND[type], item.matiere, item.saison);
+
   const matiere = item.matiere.toLowerCase();
-  const cat = item.categorie.toLowerCase();
-
-  let minTemp = 5;
-  let maxTemp = 45;
-
-  if (saison.includes('hiver') || saison.includes('automne')) {
-    minTemp = -5;
-    maxTemp = 20;
-  } else if (saison.includes('été')) {
-    minTemp = 15;
-    maxTemp = 45;
-  } else if (saison.includes('printemps')) {
-    minTemp = 8;
-    maxTemp = 35;
-  }
-
-  // Shorts/sandals are warm weather
-  if (cat === 'shorts' || cat === 'sandals') {
-    minTemp = 20;
-    maxTemp = 40;
-  }
-
-  // Coats are cold weather
-  if (cat === 'coat') {
-    minTemp = -10;
-    maxTemp = 15;
-  }
-
-  // Leather + suede don't love rain
   const rainOk = !matiere.includes('daim') && !matiere.includes('suede');
 
-  return { minTemp, maxTemp, rainOk };
+  return { minTemp: band.min, maxTemp: band.max, rainOk };
 }
 
 // --- Main adapter ---
@@ -116,7 +92,7 @@ function deriveWeather(item: ClothingItem): { minTemp: number; maxTemp: number; 
 export function toWardrobeItem(item: ClothingItem): WardrobeItem {
   const category = categoryFromSheet(item.categorie);
   const type = typeFromSheet(item.categorie, item.sousCategorie);
-  const weather = deriveWeather(item);
+  const weather = deriveWeather(item, type);
 
   // Use niveau (text) as primary, formalite (number) as fallback
   const formality = item.niveau ? mapNiveau(item.niveau) : mapFormalite(item.formalite);
@@ -128,6 +104,7 @@ export function toWardrobeItem(item: ClothingItem): WardrobeItem {
     category,
     templateId: `${category}_${type}_${item.sousCategorie.toLowerCase()}`,
     color: mapColor(item.couleur),
+    palette: item.palette,
     formality,
     contexts: deriveContexts(item.niveau, item.formalite),
     weatherSuitability: {
@@ -136,7 +113,10 @@ export function toWardrobeItem(item: ClothingItem): WardrobeItem {
       rainOk: weather.rainOk,
       windOk: true,
     },
-    availability: item.etat === 'usé' ? 'unavailable' : 'available',
+    // A worn-out garment is still wearable — it should lose to a better one, not
+    // vanish. It used to be filtered out entirely as 'unavailable'.
+    condition: item.etat,
+    availability: 'available',
     layer: category,
     createdAt: new Date().toISOString(),
   };

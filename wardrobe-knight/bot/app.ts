@@ -11,6 +11,7 @@ import { toWardrobeItems } from '../types/adapter.js';
 import type { ClothingItem } from '../types/wardrobe.js';
 import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
+import { resolveDayPlace } from '../services/destination.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
 import { askAdvisor } from '../services/advisor.js';
@@ -59,20 +60,22 @@ function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
 }
 
 async function getOutfitContext() {
-  const loc = getUserLocation();
-  const [weather, agenda, items, wornHistory] = await Promise.all([
-    fetchWeather(loc.lat, loc.lon),
+  const [agenda, items, wornHistory] = await Promise.all([
     fetchTodayAgenda(),
     sheets.getAll(),
     sheets.getWornRecently(7),
   ]);
+
+  // The agenda decides where the day happens, so it has to come first
+  const place = await resolveDayPlace(agenda);
+  const weather = place.weather;
 
   lastItems = items;
   lastWeather = weather;
   lastAgenda = agenda;
 
   const wardrobeItems = toWardrobeItems(items);
-  const context = buildDailyContext(weather, agenda);
+  const context = buildDailyContext(weather, agenda, 'mixed', place.name);
   const recentlyWorn = buildCooldownMap(wornHistory);
 
   return { weather, agenda, items, wardrobeItems, context, recentlyWorn };

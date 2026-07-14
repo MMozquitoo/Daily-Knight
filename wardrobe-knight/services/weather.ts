@@ -74,13 +74,69 @@ export async function fetchWeather(lat: number, lon: number): Promise<DayWeather
 }
 
 /** Geocode a city name using Open-Meteo (free, no key) */
-export async function geocodeCity(city: string): Promise<{ lat: number; lon: number; name: string } | null> {
-  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=fr`);
-  if (!res.ok) return null;
+interface GeoResult {
+  name: string;
+  latitude: number;
+  longitude: number;
+  country?: string;
+  population?: number;
+  feature_code?: string;
+}
+
+/**
+ * Resolve a place name to coordinates.
+ *
+ * Two traps, both of which sent the bot to the wrong weather:
+ *
+ *  - "France" resolves to the country centroid (feature_code PCLI), a field in
+ *    the Massif Central. Only a populated place (PPL*) is an answer.
+ *  - "France" ALSO resolves to a village called France in Mozambique, which *is*
+ *    a populated place. Taking the first PPL hit put a July trip to Nice into
+ *    southern-hemisphere winter. So results are ranked, not taken in order:
+ *    a hit whose country is named in the query wins, then the biggest town.
+ */
+async function search(query: string): Promise<GeoResult[]> {
+  const res = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=fr`,
+  );
+  if (!res.ok) return [];
+
   const data = await res.json();
-  const result = data.results?.[0];
-  if (!result) return null;
-  return { lat: result.latitude, lon: result.longitude, name: result.name };
+  return (data.results ?? []).filter((r: GeoResult) => r.feature_code?.startsWith('PPL'));
+}
+
+export async function geocodeCity(
+  query: string,
+  context = '',
+): Promise<{ lat: number; lon: number; name: string } | null> {
+  return geocodeBest([query], context || query);
+}
+
+/**
+ * Resolve a free-text location by asking about every part of it and ranking all
+ * the answers together.
+ *
+ * Trying the parts one at a time and taking the first hit is what broke: for
+ * "Nice, France", asking about "France" first returns a real village called
+ * France, so the bot never got as far as Nice. Ranking globally lets Nice — a
+ * city of 340,000 in the country the query names — beat the hamlet.
+ */
+export async function geocodeBest(
+  queries: string[],
+  context = '',
+): Promise<{ lat: number; lon: number; name: string } | null> {
+  const results = (await Promise.all(queries.map(search))).flat();
+  if (results.length === 0) return null;
+
+  const haystack = context.toLowerCase();
+  const rank = (place: GeoResult): number => {
+    const countryNamed = place.country && haystack.includes(place.country.toLowerCase()) ? 1_000_000 : 0;
+    const named = haystack.includes(place.name.toLowerCase()) ? 500_000 : 0;
+    return countryNamed + named + (place.population ?? 0);
+  };
+
+  const best = results.reduce((a, b) => (rank(b) > rank(a) ? b : a));
+  return { lat: best.latitude, lon: best.longitude, name: best.name };
 }
 
 /** Get location from environment variables */

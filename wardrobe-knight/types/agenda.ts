@@ -15,6 +15,8 @@ export interface AgendaEvent {
   startTime: string;
   endTime: string;
   tag: EventTag;
+  /** Google Calendar's location field — where the day actually happens */
+  location?: string;
 }
 
 /** Summary of the day's agenda — input to the decision engine */
@@ -23,4 +25,9 @@ export interface AgendaSummary {
   meetingsCount: number;
   highestFormality: EventTag;
   dayType: 'office' | 'casual' | 'travel' | 'mixed';
+  /**
+   * Where to dress for. If the day includes a trip, the weather that matters is
+   * the destination's, not the one outside the bedroom window.
+   */
+  destination?: string;
 }

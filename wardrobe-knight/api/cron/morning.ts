@@ -7,6 +7,7 @@ import * as sheets from '../../services/sheets.js';
 import * as memory from '../../services/memory.js';
 import { getPlannedOutfit } from '../../services/planner.js';
 import { fetchWeather, getUserLocation } from '../../services/weather.js';
+import { resolveDayPlace } from '../../services/destination.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
 import { outfitMessage } from '../../bot/blocks.js';
 
@@ -53,12 +54,15 @@ export default async function handler(_req: Request, res: Response): Promise<voi
     // Check for pre-planned outfit first
     const planned = await getPlannedOutfit(todayStr()).catch(() => null);
 
-    const [weather, agenda, items, wornHistory] = await Promise.all([
-      fetchWeather(loc.lat, loc.lon),
+    const [agenda, items, wornHistory] = await Promise.all([
       fetchTodayAgenda(),
       sheets.getAll(),
       sheets.getWornRecently(7),
     ]);
+
+    // Dress for where the day happens, not for the bedroom window
+    const place = await resolveDayPlace(agenda);
+    const weather = place.weather;
 
     let recommendation;
 
@@ -78,7 +82,7 @@ export default async function handler(_req: Request, res: Response): Promise<voi
     } else {
       // Generate on the fly
       const wardrobeItems = toWardrobeItems(items);
-      const context = buildDailyContext(weather, agenda);
+      const context = buildDailyContext(weather, agenda, 'mixed', place.name);
       const recentlyWorn = buildCooldownMap(wornHistory);
       recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
     }

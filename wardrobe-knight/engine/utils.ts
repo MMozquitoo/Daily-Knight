@@ -42,12 +42,35 @@ export function getDayContextTag(context: DailyContext): WardrobeItem['contexts'
   return DAY_TYPE_CONTEXT[context.agenda.dayType];
 }
 
+/**
+ * The temperature the outfit has to survive.
+ *
+ * You dress once, in the morning, for the whole day — so the day's high is what
+ * matters, not the reading at 8am. Judging on the current temperature is how a
+ * 23°C morning with a 34°C afternoon got a hooded sweatshirt.
+ */
+export function dayTemperature(context: DailyContext): number {
+  return context.weather.tempMax ?? context.weather.temperature;
+}
+
+/** How far the day swings — drives whether to carry a layer for the cool hours */
+export function temperatureRange(context: DailyContext): number {
+  const { tempMin, tempMax } = context.weather;
+  if (tempMin === undefined || tempMax === undefined) return 0;
+  return tempMax - tempMin;
+}
+
 export function isColdDay(context: DailyContext): boolean {
-  return context.weather.temperature < 18 || context.weather.feelsLike < 16;
+  return dayTemperature(context) < 18 || context.weather.feelsLike < 16;
 }
 
 export function isHotDay(context: DailyContext): boolean {
-  return context.weather.temperature > 24;
+  return dayTemperature(context) > 24;
+}
+
+/** Shorts weather. The owner wants these first when it is genuinely warm. */
+export function isShortsWeather(context: DailyContext): boolean {
+  return dayTemperature(context) >= 26 && !isRainyDay(context);
 }
 
 export function isRainyDay(context: DailyContext): boolean {
@@ -63,6 +86,8 @@ export function needsOuterwear(context: DailyContext): boolean {
 }
 
 export function getTemperatureSwing(context: DailyContext): number {
+  const range = temperatureRange(context);
+  if (range > 0) return range;
   return Math.abs(context.weather.temperature - context.weather.feelsLike);
 }
 

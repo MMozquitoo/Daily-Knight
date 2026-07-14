@@ -7,6 +7,7 @@
 
 import {
   ACCESSORY_SCORE_MIN,
+  CONDITION_MULTIPLIER,
   CONTEXT_SCORES,
   FORMALITY_SCORES,
   HOT_TEMP,
@@ -18,16 +19,18 @@ import type { DailyContext } from '../types/context.js';
 import type { WardrobeItem } from '../types/wardrobe.js';
 import type { ScoredItem } from './types.js';
 import {
+  dayTemperature,
   getDayContextTag,
   getFormalityDistance,
   getRequiredFormality,
   isHotDay,
   isRainyDay,
+  isShortsWeather,
   isWindyDay,
 } from './utils.js';
 
 function scoreWeather(item: WardrobeItem, context: DailyContext): number {
-  const temp = context.weather.temperature;
+  const temp = dayTemperature(context);
   const center = (item.weatherSuitability.minTemp + item.weatherSuitability.maxTemp) / 2;
   const distance = Math.abs(temp - center);
   let score = distance <= 4 ? WEATHER_BONUSES.exactTempFit : WEATHER_BONUSES.nearTempFit;
@@ -38,8 +41,13 @@ function scoreWeather(item: WardrobeItem, context: DailyContext): number {
   if (item.category === 'shoes' && item.type !== 'sandals' && (isRainyDay(context) || isWindyDay(context))) {
     score += WEATHER_BONUSES.closedShoesOnWetDay;
   }
-  if (isHotDay(context) && (item.category === 'outerwear' || item.type === 'boots')) {
-    score += WEATHER_BONUSES.hotDayHeavyPenalty;
+  if (isHotDay(context) && item.category === 'outerwear') score += WEATHER_BONUSES.hotDayHeavyPenalty;
+  if (isHotDay(context) && item.type === 'boots') score += WEATHER_BONUSES.bootsOnHotDay;
+
+  // Warm day: reach for the shorts before the trousers
+  if (isShortsWeather(context)) {
+    if (item.type === 'shorts') score += WEATHER_BONUSES.shortsOnHotDay;
+    if (item.type === 'pants' || item.type === 'jeans') score += WEATHER_BONUSES.longLegsOnHotDay;
   }
 
   return Math.max(0, Math.min(WEATHER_WEIGHT, score));
@@ -92,10 +100,11 @@ export function scoreItems(
         style: scoreStyle(item, context),
       };
       const rawScore = breakdown.weather + breakdown.formality + breakdown.context + breakdown.style;
+      const wear = CONDITION_MULTIPLIER[item.condition] ?? 1;
       return {
         item,
         breakdown,
-        score: rawScore * getCooldownMultiplier(item.id, recentlyWorn),
+        score: rawScore * getCooldownMultiplier(item.id, recentlyWorn) * wear,
       };
     })
     .filter((entry) => {

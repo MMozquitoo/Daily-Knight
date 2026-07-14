@@ -5,17 +5,12 @@
  */
 
 import type { DailyContext } from '../types/context.js';
-import type { PaletteColor, WardrobeItem } from '../types/wardrobe.js';
+import type { WardrobeItem } from '../types/wardrobe.js';
 import type { Conflict, RawOutfit, ValidationResult } from './types.js';
-import { getFormalityDistance, isNeutralColor, needsOuterwear } from './utils.js';
+import { evaluateHarmony } from './harmony.js';
+import { dayTemperature, getFormalityDistance, needsOuterwear } from './utils.js';
 
 const RAIN_UNSAFE_TYPES = new Set(['sandals', 'shorts']);
-
-function collectColors(outfit: RawOutfit): PaletteColor[] {
-  return [outfit.top, outfit.bottom, outfit.shoes, outfit.outerwear, ...outfit.accessories]
-    .filter(Boolean)
-    .map((item) => (item as WardrobeItem).color);
-}
 
 export function validateOutfit(outfit: RawOutfit | null, context: DailyContext): ValidationResult {
   const conflicts: Conflict[] = [];
@@ -42,18 +37,12 @@ export function validateOutfit(outfit: RawOutfit | null, context: DailyContext):
     });
   }
 
-  const colors = collectColors(outfit);
-  const accentColors = colors.filter((color) => !isNeutralColor(color));
-  if (accentColors.length > 1 || new Set(colors).size > 4) {
-    conflicts.push({
-      code: 'color_mismatch',
-      message: 'The color combination is too busy.',
-      itemIds: [outfit.top.id, outfit.bottom.id, outfit.shoes.id],
-    });
-  }
+  // Colour is judged by engine/harmony.ts — leather matching, black/brown,
+  // navy/black, warm-vs-cool, not just "too many colours"
+  conflicts.push(...evaluateHarmony(outfit).conflicts);
 
   const rainUnsafeItems = primaryItems.filter((item) => RAIN_UNSAFE_TYPES.has(item.type));
-  if ((context.weather.rainProbability > 30 || context.weather.temperature < 12) && rainUnsafeItems.length > 0) {
+  if ((context.weather.rainProbability > 30 || dayTemperature(context) < 12) && rainUnsafeItems.length > 0) {
     conflicts.push({
       code: 'weather_mismatch',
       message: 'One or more items are not suitable for today\'s weather.',

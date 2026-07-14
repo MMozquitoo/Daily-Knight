@@ -8,10 +8,10 @@
 import type { AgendaSummary } from '../types/agenda.js';
 import type { DailyContext } from '../types/context.js';
 import type { FormalityLevel } from '../types/wardrobe.js';
-import type { WeatherData } from '../types/weather.js';
+import type { DayWeather } from '../types/weather.js';
 
 export function buildDailyContext(
-  weather: WeatherData,
+  weather: DayWeather,
   agenda: AgendaSummary,
   stylePreference: FormalityLevel | 'mixed' = 'mixed',
   location = 'Paris',

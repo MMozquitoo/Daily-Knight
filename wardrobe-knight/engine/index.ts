@@ -8,11 +8,13 @@
 
 import type { DailyContext } from '../types/context.js';
 import type { OutfitRecommendation } from '../types/outfit.js';
-import type { WardrobeItem } from '../types/wardrobe.js';
+import type { LayerCategory, WardrobeItem } from '../types/wardrobe.js';
 import { assembleOutfit } from './assembler.js';
 import { recommendCarry } from './carry.js';
 import { filterItems } from './filter.js';
+import { evaluateHarmony } from './harmony.js';
 import type { AssembleOptions, OutfitLayer, RawOutfit, ScoredItem } from './types.js';
+import { needsOuterwear } from './utils.js';
 import { validateOutfit } from './validator.js';
 import { generateWhy } from './why.js';
 import { scoreItems } from './scorer.js';
@@ -32,32 +34,98 @@ function toRecommendation(outfit: RawOutfit, context: DailyContext): OutfitRecom
   };
 }
 
+/** How many candidates per layer to consider when composing */
+const CANDIDATES_PER_LAYER = 6;
+
+/** How much a coordinated palette is worth against raw per-item score */
+const HARMONY_WEIGHT = 2.5;
+
+function topCandidates(
+  scoredItems: ScoredItem[],
+  layer: LayerCategory,
+  excluded: Set<string>,
+  lockedId?: string,
+): ScoredItem[] {
+  if (lockedId) {
+    const locked = scoredItems.find((entry) => entry.item.id === lockedId);
+    return locked ? [locked] : [];
+  }
+  return scoredItems
+    .filter((entry) => entry.item.category === layer && !excluded.has(entry.item.id))
+    .slice(0, CANDIDATES_PER_LAYER);
+}
+
+/**
+ * Compose the best-looking valid outfit, not merely three separately-good garments.
+ *
+ * The old assembler took the top-scoring item in each layer independently, then
+ * dropped whichever piece caused a conflict and tried again. Nothing ever compared
+ * one *combination* against another, so a coordinated outfit could only happen by
+ * luck. Here every plausible combination of the top few per layer is scored as a
+ * whole — item scores plus how well the palette hangs together — and the best one
+ * wins.
+ */
 function findValidOutfit(
   scoredItems: ScoredItem[],
   context: DailyContext,
   options: AssembleOptions = {},
 ): RawOutfit {
   const excluded = new Set(options.excludedItemIds ?? []);
-  const maxAttempts = Math.max(1, scoredItems.length);
+  const locked = options.lockedLayerIds ?? {};
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const outfit = assembleOutfit(scoredItems, context, {
-      ...options,
-      excludedItemIds: [...excluded],
-    });
+  const tops = topCandidates(scoredItems, 'top', excluded, locked.top);
+  const bottoms = topCandidates(scoredItems, 'bottom', excluded, locked.bottom);
+  const shoes = topCandidates(scoredItems, 'shoes', excluded, locked.shoes);
 
-    const validation = validateOutfit(outfit, context);
-    if (outfit && validation.valid) return outfit;
+  const outerwearOptions: (ScoredItem | undefined)[] = needsOuterwear(context)
+    ? topCandidates(scoredItems, 'outerwear', excluded, locked.outerwear)
+    : [undefined];
+  if (outerwearOptions.length === 0) outerwearOptions.push(undefined);
 
-    const conflictingIds = validation.conflicts.flatMap((conflict) => conflict.itemIds);
-    const nextExcluded = conflictingIds
-      .map((id) => scoredItems.find((entry) => entry.item.id === id))
-      .filter(Boolean)
-      .sort((left, right) => (left?.score ?? 0) - (right?.score ?? 0))[0];
+  // One of each kind. Taking the top two by score alone put two baseball caps on
+  // the same head.
+  const seenTypes = new Set<string>();
+  const accessories = scoredItems
+    .filter((entry) => entry.item.category === 'accessories' && !excluded.has(entry.item.id))
+    .filter((entry) => {
+      if (seenTypes.has(entry.item.type)) return false;
+      seenTypes.add(entry.item.type);
+      return true;
+    })
+    .slice(0, 2)
+    .map((entry) => entry.item);
 
-    if (!nextExcluded) break;
-    excluded.add(nextExcluded.item.id);
+  let best: { outfit: RawOutfit; total: number } | null = null;
+
+  for (const top of tops) {
+    for (const bottom of bottoms) {
+      for (const shoe of shoes) {
+        for (const outer of outerwearOptions) {
+          const outfit: RawOutfit = {
+            top: top.item,
+            bottom: bottom.item,
+            shoes: shoe.item,
+            outerwear: outer?.item,
+            accessories,
+          };
+
+          if (!validateOutfit(outfit, context).valid) continue;
+
+          const itemScore = top.score + bottom.score + shoe.score + (outer?.score ?? 0);
+          const total = itemScore + evaluateHarmony(outfit).score * HARMONY_WEIGHT;
+
+          if (!best || total > best.total) best = { outfit, total };
+        }
+      }
+    }
   }
+
+  if (best) return best.outfit;
+
+  // Nothing survived the rules — fall back to the old greedy pick so the user gets
+  // *something*, rather than an error at 7am.
+  const fallback = assembleOutfit(scoredItems, context, { ...options, excludedItemIds: [...excluded] });
+  if (fallback) return fallback;
 
   throw new Error('Impossible de composer une tenue valide avec ton armoire actuelle.');
 }

@@ -101,6 +101,10 @@ export interface WardrobeItem {
   category: LayerCategory;
   templateId: string;
   color: PaletteColor;
+  /** Sheet column G — warm/cool/neutral, used for palette coherence */
+  palette: PaletteTemp;
+  /** Sheet column O — a worn-out garment is deprioritised, not excluded */
+  condition: ItemCondition;
   formality: FormalityLevel;
   contexts: UsageContext[];
   weatherSuitability: WeatherRange;

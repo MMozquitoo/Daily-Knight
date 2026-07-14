@@ -67,12 +67,28 @@ function deriveDayType(events: AgendaEvent[]): AgendaSummary['dayType'] {
 }
 
 /** Build AgendaSummary from a list of events */
+/**
+ * Where the day happens.
+ *
+ * A trip to Nice is a different wardrobe than a day in Paris, and the calendar is
+ * the only thing that knows. A travel-tagged event's location wins; failing that,
+ * any event with a location at all.
+ */
+function deriveDestination(events: AgendaEvent[]): string | undefined {
+  const travel = events.find((e) => e.tag === 'travel' && e.location);
+  if (travel?.location) return travel.location;
+
+  const located = events.find((e) => e.location);
+  return located?.location;
+}
+
 function buildSummary(events: AgendaEvent[]): AgendaSummary {
   return {
     events,
     meetingsCount: events.length,
     highestFormality: highestTag(events.map((e) => e.tag)),
     dayType: deriveDayType(events),
+    destination: deriveDestination(events),
   };
 }
 
@@ -101,6 +117,7 @@ export async function fetchTodayAgenda(): Promise<AgendaSummary> {
       startTime: e.start?.dateTime ?? '',
       endTime: e.end?.dateTime ?? '',
       tag: classifyEvent(e.summary ?? ''),
+      location: e.location ?? undefined,
     }));
 
   return buildSummary(events);
