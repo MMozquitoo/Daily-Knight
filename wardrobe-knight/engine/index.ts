@@ -12,7 +12,7 @@ import type { LayerCategory, WardrobeItem } from '../types/wardrobe.js';
 import { assembleOutfit } from './assembler.js';
 import { recommendCarry } from './carry.js';
 import { filterItems } from './filter.js';
-import { evaluateHarmony } from './harmony.js';
+import { evaluateHarmony, accessorySuits } from './harmony.js';
 import type { AssembleOptions, OutfitLayer, RawOutfit, ScoredItem } from './types.js';
 import { needsOuterwear } from './utils.js';
 import { validateOutfit } from './validator.js';
@@ -123,10 +123,12 @@ function findValidOutfit(
   }
 
   if (best) {
-    // Add up to two accessories, each only if it keeps the outfit conflict-free
+    // Add up to two accessories, each only if it suits the occasion AND keeps the
+    // outfit conflict-free — so a smart tie never lands on casual shorts.
     const accessories: WardrobeItem[] = [];
     for (const candidate of accessoryCandidates) {
       if (accessories.length >= 2) break;
+      if (!accessorySuits(candidate, best.outfit)) continue;
       const trial = { ...best.outfit, accessories: [...accessories, candidate] };
       if (evaluateHarmony(trial).conflicts.length === 0) accessories.push(candidate);
     }

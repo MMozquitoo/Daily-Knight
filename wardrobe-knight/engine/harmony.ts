@@ -21,12 +21,38 @@
  *   6. Some contrast between top and bottom — head-to-toe one shade is a uniform.
  */
 
-import type { PaletteColor, PaletteTemp, WardrobeItem } from '../types/wardrobe.js';
+import type { FormalityLevel, PaletteColor, PaletteTemp, WardrobeItem } from '../types/wardrobe.js';
 import type { Conflict, RawOutfit } from './types.js';
 import { isNeutralColor } from './utils.js';
 
 /** Leather goods whose colours must agree */
 const LEATHER_TYPES = new Set(['belt', 'shoes', 'boots', 'loafers']);
+
+const FORMALITY_RANK: Record<FormalityLevel, number> = { casual: 0, smart: 1, formal: 2 };
+
+/**
+ * Is this accessory appropriate for the outfit — not just colour-compatible?
+ *
+ * Colour harmony let a smart knit tie land on casual chino shorts, because black is
+ * neutral and clashes with nothing. But a tie with shorts is wrong at any colour.
+ * Accessories have to suit the OCCASION the outfit sets, not only its palette.
+ */
+export function accessorySuits(accessory: WardrobeItem, outfit: RawOutfit): boolean {
+  // A tie needs a real shirt and long legs — never a t-shirt/polo/sweater, never shorts.
+  if (accessory.type === 'tie') {
+    if (outfit.top.type !== 'shirt') return false;
+    if (outfit.bottom.type === 'shorts' || outfit.bottom.type === 'skirt') return false;
+  }
+
+  // Don't dress up a casual base: an accessory more than one formality step above the
+  // outfit's least-formal core piece looks borrowed from another outfit.
+  const base = Math.min(
+    ...[outfit.top, outfit.bottom, outfit.shoes].map((i) => FORMALITY_RANK[i.formality]),
+  );
+  if (FORMALITY_RANK[accessory.formality] - base > 1) return false;
+
+  return true;
+}
 
 /** Colours that read as leather */
 const LEATHER_COLORS = new Set<PaletteColor>(['black', 'brown']);
