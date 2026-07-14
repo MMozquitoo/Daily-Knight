@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { planWeek } from '../../services/planner.js';
 
@@ -6,7 +7,8 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireCron(req, res)) return;
   try {
     const planned = await planWeek(7, false);
 

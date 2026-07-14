@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { generateOutfit } from '../../engine/index.js';
 import { buildDailyContext } from '../../engine/context.js';
@@ -41,7 +42,8 @@ function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
   return map;
 }
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireCron(req, res)) return;
   if (!SLACK_USER_ID) {
     res.status(500).json({ error: 'SLACK_USER_ID not configured' });
     return;

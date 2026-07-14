@@ -5,6 +5,7 @@
  */
 
 import { App, ExpressReceiver } from '@slack/bolt';
+import { signFileUrl } from '../api/_sign.js';
 import { generateOutfit, regenerateOutfit } from '../engine/index.js';
 import { buildDailyContext } from '../engine/context.js';
 import { toWardrobeItems } from '../types/adapter.js';
@@ -179,7 +180,8 @@ const VERCEL_BASE = process.env.VERCEL_PROJECT_PRODUCTION_URL
     : 'https://daily-knight.vercel.app';
 
 function buildImageProxyUrl(slackPrivateUrl: string): string {
-  return `${VERCEL_BASE}/api/images?url=${encodeURIComponent(slackPrivateUrl)}`;
+  const sig = signFileUrl(slackPrivateUrl);
+  return `${VERCEL_BASE}/api/images?url=${encodeURIComponent(slackPrivateUrl)}&sig=${sig}`;
 }
 
 async function handleImageMessage(
@@ -210,9 +212,7 @@ async function handleImageMessage(
     return;
   }
   const imageUrl = buildImageProxyUrl(imageFile.url_private_download);
-  const generatedId = await sheets.generateId(parsed.categorie);
-  const item: ClothingItem = {
-    id: generatedId,
+  const fields = {
     categorie: parsed.categorie ?? '',
     sousCategorie: parsed.sousCategorie ?? '',
     marque: parsed.marque ?? '',
@@ -229,7 +229,9 @@ async function handleImageMessage(
     etat: parsed.etat ?? 'neuf',
     imageUrl,
   };
-  await sheets.append(item);
+  // ID assigned atomically so two quick photos can't collide on it
+  const id = await sheets.createItem(fields);
+  const item = { ...fields, id } as ClothingItem;
   await say({ blocks: savedItemMessage(item) as any });
 
   // Auto-generate try-on in background (don't block the response)
@@ -297,9 +299,7 @@ app.message(async ({ message, say }) => {
         await say('Je n\'ai pas pu détecter le type de vêtement. Essaie avec plus de détails (ex : « ajoute un jean noir slim de Zara formalité 2 »)');
         return;
       }
-      const generatedId = await sheets.generateId(parsed.categorie);
-      const item: ClothingItem = {
-        id: generatedId,
+      const fields = {
         categorie: parsed.categorie ?? '',
         sousCategorie: parsed.sousCategorie ?? '',
         marque: parsed.marque ?? '',
@@ -315,7 +315,8 @@ app.message(async ({ message, say }) => {
         polyvalence: parsed.polyvalence ?? 3,
         etat: parsed.etat ?? 'neuf',
       };
-      await sheets.append(item);
+      const id = await sheets.createItem(fields);
+      const item = { ...fields, id } as ClothingItem;
       await say({ blocks: savedItemMessage(item) as any });
     } catch (err) {
       await say(`:x: Erreur d'interprétation : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);

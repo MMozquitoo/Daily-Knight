@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { detectTrips } from '../../services/calendar.js';
 import { geocodeCity, fetchWeatherForecast } from '../../services/weather.js';
@@ -89,7 +90,8 @@ async function buildPackingList(
   return lines.join('\n');
 }
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireCron(req, res)) return;
   if (!SLACK_USER_ID || !process.env.SLACK_BOT_TOKEN) {
     res.status(500).json({ error: 'SLACK_USER_ID or SLACK_BOT_TOKEN not configured' });
     return;

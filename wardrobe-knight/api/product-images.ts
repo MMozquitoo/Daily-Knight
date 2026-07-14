@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireSecret } from './_auth.js';
 import * as sheets from '../services/sheets.js';
 import { createProductPrediction, waitForProductPrediction } from '../services/product-image.js';
 
@@ -30,6 +31,7 @@ async function createWithRetry(
 }
 
 export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireSecret(req, res)) return;
   const items = await sheets.getAll();
   const regenerate = req.query.regenerate === 'true';
   const itemId = req.query.id as string | undefined;

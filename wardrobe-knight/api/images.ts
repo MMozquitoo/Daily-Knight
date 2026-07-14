@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { verifyFileUrl } from './_sign.js';
 
 export const config = {
   runtime: 'nodejs',
@@ -8,6 +9,14 @@ export default async function handler(req: Request, res: Response): Promise<void
   const fileUrl = req.query.url as string | undefined;
   if (!fileUrl || !fileUrl.startsWith('https://files.slack.com/')) {
     res.status(400).json({ error: 'Missing or invalid url parameter' });
+    return;
+  }
+
+  // Only serve URLs the bot itself signed. Without this, anyone who sees one proxy
+  // link can swap the url param and pull any other private workspace file, because
+  // we fetch it with the bot token on their behalf.
+  if (!verifyFileUrl(fileUrl, req.query.sig as string | undefined)) {
+    res.status(403).json({ error: 'Invalid or missing signature' });
     return;
   }
 

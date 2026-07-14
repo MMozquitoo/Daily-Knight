@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireSecret } from './_auth.js';
 import * as sheets from '../services/sheets.js';
 import { createTryOnPrediction, waitForPrediction } from '../services/tryon.js';
 
@@ -26,7 +27,8 @@ async function createWithRetry(item: Parameters<typeof createTryOnPrediction>[0]
   return null;
 }
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireSecret(req, res)) return;
   const items = await sheets.getAll();
   const pending = items.filter((i) => i.imageUrl && !i.tryonUrl);
 

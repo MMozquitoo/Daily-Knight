@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { requireSecret } from './_auth.js';
 import Replicate from 'replicate';
 import * as sheets from '../services/sheets.js';
 import { uploadImageFromUrl } from '../services/blob.js';
@@ -9,7 +10,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export default async function handler(_req: Request, res: Response): Promise<void> {
+export default async function handler(req: Request, res: Response): Promise<void> {
+  if (!requireSecret(req, res)) return;
   const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
   const items = await sheets.getAll();
 

@@ -114,50 +114,111 @@ export async function generateId(categorie: string): Promise<string> {
   return `${prefix}-${next.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Serialise every read-modify-write against the sheet.
+ *
+ * append() and update() each read the sheet, compute a row, then write it back.
+ * Run two concurrently and they interleave: two appends compute the same next row
+ * (or the same generated ID) and one garment vanishes; two updates to different
+ * columns of the same item both read first, and the last write silently discards
+ * the other's column. Both were reproduced. Chaining through one promise makes the
+ * sequence atomic within this process — which is where the concurrency actually
+ * happens (two quick "ajoute" photos, or a tryon and a product-image write racing
+ * inside the same handler).
+ */
+let writeChain: Promise<unknown> = Promise.resolve();
+function serialise<T>(task: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(task, task);
+  // Keep the chain alive even if a task rejects, without unhandled-rejection noise
+  writeChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+/**
+ * Create an item, assigning its ID atomically.
+ *
+ * generateId() and append() as two separate calls let two concurrent "ajoute"
+ * photos both read max=JE-02, both mint JE-03, and both append — a duplicate ID,
+ * after which getById/update silently hit only the first row. Assigning the ID
+ * inside the same locked section as the append closes that window.
+ */
+export async function createItem(item: Omit<ClothingItem, 'id'>): Promise<string> {
+  return serialise(async () => {
+    const sheets = getSheets();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId(),
+      range: RANGE,
+    });
+    const rows = res.data.values ?? [];
+
+    const prefix = CATEGORY_PREFIXES[item.categorie.toLowerCase()] ?? 'XX';
+    const used = rows
+      .slice(1)
+      .map((row) => row[0] as string)
+      .filter((id) => id?.startsWith(prefix + '-'))
+      .map((id) => parseInt(id.split('-')[1] ?? '0', 10))
+      .filter((n) => !isNaN(n));
+    const id = `${prefix}-${(used.length ? Math.max(...used) + 1 : 1).toString().padStart(2, '0')}`;
+
+    const nextRow = rows.length + 1;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [itemToRow({ ...item, id } as ClothingItem)] },
+    });
+    return id;
+  });
+}
+
 /** Append a new item to the sheet */
 export async function append(item: ClothingItem): Promise<void> {
-  const sheets = getSheets();
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A:A`,
-  });
-  const nextRow = (res.data.values?.length ?? 1) + 1;
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: [itemToRow(item)],
-    },
+  return serialise(async () => {
+    const sheets = getSheets();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId(),
+      range: `${SHEET_NAME}!A:A`,
+    });
+    const nextRow = (res.data.values?.length ?? 1) + 1;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [itemToRow(item)],
+      },
+    });
   });
 }
 
 /** Update an existing item by ID (finds row, overwrites) */
 export async function update(id: string, fields: Partial<ClothingItem>): Promise<boolean> {
-  const sheets = getSheets();
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId(),
-    range: RANGE,
+  return serialise(async () => {
+    const sheets = getSheets();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId(),
+      range: RANGE,
+    });
+
+    const rows = res.data.values ?? [];
+    const rowIndex = rows.findIndex((row, i) => i > 0 && row[0] === id);
+    if (rowIndex === -1) return false;
+
+    const current = rowToItem(rows[rowIndex]);
+    const updated = { ...current, ...fields };
+    const rowNumber = rowIndex + 1; // 1-based for Sheets API
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${SHEET_NAME}!A${rowNumber}:R${rowNumber}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [itemToRow(updated)],
+      },
+    });
+
+    return true;
   });
-
-  const rows = res.data.values ?? [];
-  const rowIndex = rows.findIndex((row, i) => i > 0 && row[0] === id);
-  if (rowIndex === -1) return false;
-
-  const current = rowToItem(rows[rowIndex]);
-  const updated = { ...current, ...fields };
-  const rowNumber = rowIndex + 1; // 1-based for Sheets API
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId(),
-    range: `${SHEET_NAME}!A${rowNumber}:R${rowNumber}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: [itemToRow(updated)],
-    },
-  });
-
-  return true;
 }
 
 /** Delete an item by ID (finds row, deletes it) */
