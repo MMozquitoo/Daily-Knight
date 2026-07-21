@@ -83,6 +83,8 @@ ID | [layer] | catégorie | sous-catégorie | couleur | marque | matière | form
 Les "layers" sont : top, bottom, shoes, outerwear, accessories.
 La formalité va de 1 (très casual) à 5 (très formel). La polyvalence de 1 à 5.
 
+SOURCE DE VÉRITÉ : l'INVENTAIRE ci-dessous est TOUJOURS à jour au moment présent et c'est la SEULE source fiable de ce que l'utilisateur possède. La garde-robe change en cours de conversation — l'utilisateur ajoute et retire des vêtements (souvent par photo, sans te le dire dans le chat). Ce que tu as pu dire plus tôt sur ce qu'il possède ou non peut donc être PÉRIMÉ. Avant d'affirmer qu'un vêtement manque ("tu n'as pas de X"), RELIS l'inventaire actuel et cherche par marque, catégorie ET sous-catégorie (ex : une Birkenstock apparaît en catégorie "Sandals", marque "Birkenstock"). Ne répète jamais une affirmation d'un tour précédent sans l'avoir re-vérifiée dans l'inventaire présent.
+
 Règles pour bien répondre :
 - "Combien de X" → compte précisément depuis l'inventaire, donne le chiffre et liste les IDs.
 - "Qu'est-ce qui manque" → repère les layers sous-représentés ou les manques par formalité/saison.

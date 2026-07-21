@@ -16,7 +16,7 @@ import { resolveDayPlace } from '../services/destination.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { todayStr, daysAgo } from '../services/dates.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
-import { askAdvisor } from '../services/advisor.js';
+import { askAdvisor, clearHistory } from '../services/advisor.js';
 import { generateTryOn } from '../services/tryon.js';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
@@ -197,6 +197,7 @@ async function handleImageMessage(
   imageFile: { id: string; mimetype: string; url_private_download?: string; permalink?: string },
   userText: string | undefined,
   say: (msg: any) => Promise<any>,
+  userId?: string,
 ): Promise<void> {
   if (!imageFile.url_private_download) {
     await say(':x: Je ne peux pas accéder à la photo. Vérifie que le bot a le scope `files:read`.');
@@ -241,6 +242,10 @@ async function handleImageMessage(
   // ID assigned atomically so two quick photos can't collide on it
   const id = await sheets.createItem(fields);
   const item = { ...fields, id } as ClothingItem;
+  // The wardrobe just changed. Drop this user's advisor chat history so a stale
+  // "tu n'as pas de X" from an earlier turn can't anchor the next answer against
+  // the item they just added.
+  if (userId) clearHistory(userId);
   await say({ blocks: savedItemMessage(item) as any });
 
   // Auto-generate try-on in the background — but ONLY off Vercel. On serverless the
@@ -285,7 +290,7 @@ app.event('message', async ({ event, say }) => {
 
   try {
     const userText = msg.text || undefined;
-    await handleImageMessage(imageFile, userText, say);
+    await handleImageMessage(imageFile, userText, say, msg.user);
   } catch (err) {
     await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
   }
@@ -335,6 +340,9 @@ app.message(async ({ message, say }) => {
       };
       const id = await sheets.createItem(fields);
       const item = { ...fields, id } as ClothingItem;
+      // Wardrobe changed — drop stale advisor history (see handleImageMessage).
+      const addUserId = 'user' in message ? (message as any).user : undefined;
+      if (addUserId) clearHistory(addUserId);
       await say({ blocks: savedItemMessage(item) as any });
     } catch (err) {
       await say(`:x: Erreur d'interprétation : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
