@@ -1,7 +1,7 @@
 import Replicate from 'replicate';
 import { categoryFromSheet } from '../types/wardrobe.js';
 import type { ClothingItem } from '../types/wardrobe.js';
-import { uploadImageFromUrl } from './blob.js';
+import { uploadImageFromUrl, findBlob } from './blob.js';
 
 let client: Replicate | null = null;
 
@@ -110,6 +110,10 @@ export async function generateOutfitLook(
   if (!top.imageUrl || !bottom.imageUrl) return null;
 
   const base = `tryon/look-${top.id}-${bottom.id}`;
+  // Instant when pre-generated (or seen before) — the nightly cron warms this.
+  const cached = await findBlob(`${base}.png`).catch(() => null);
+  if (cached) return cached;
+
   // Bottom first, then the top over it. If we did the top first, a strongly
   // coloured top bled its colour into the trousers on the second (lower-body)
   // pass. Setting the trousers first and finishing with the upper body keeps

@@ -4,7 +4,8 @@ import { WebClient } from '@slack/web-api';
 import { detectTrips } from '../../services/calendar.js';
 import { todayStr, localDateStr } from '../../services/dates.js';
 import { geocodeCity, fetchWeatherForecast } from '../../services/weather.js';
-import { planWeek } from '../../services/planner.js';
+import { planWeek, getPlannedOutfit } from '../../services/planner.js';
+import { generateOutfitLook } from '../../services/tryon.js';
 import * as sheets from '../../services/sheets.js';
 import type { ClothingItem } from '../../types/wardrobe.js';
 import { categoryFromSheet } from '../../types/wardrobe.js';
@@ -169,7 +170,25 @@ export default async function handler(req: Request, res: Response): Promise<void
       await slack.chat.postMessage({ channel: SLACK_USER_ID, text: msg });
     }
 
-    res.status(200).json({ ok: true, messagesSent: messages.length });
+    // Pre-generate tomorrow's virtual try-on so the morning delivery is instant.
+    // Best-effort and last (it's the slow part). generateOutfitLook caches to a
+    // deterministic path, so the morning cron gets an immediate cache hit.
+    let pregen: string | null = null;
+    try {
+      const planned = await getPlannedOutfit(tomorrowStr);
+      if (planned?.top && planned.bottom) {
+        const items = await sheets.getAll();
+        const topItem = items.find((i) => i.id === planned.top);
+        const bottomItem = items.find((i) => i.id === planned.bottom);
+        if (topItem && bottomItem) {
+          pregen = await generateOutfitLook(topItem, bottomItem);
+        }
+      }
+    } catch (err) {
+      console.error('[EVENING PREGEN]', err);
+    }
+
+    res.status(200).json({ ok: true, messagesSent: messages.length, pregen: pregen ? 'cached' : 'skipped' });
   } catch (err) {
     console.error('[CRON EVENING]', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown' });

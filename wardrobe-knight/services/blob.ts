@@ -1,4 +1,12 @@
-import { put } from '@vercel/blob';
+import { put, list } from '@vercel/blob';
+
+/** Return the public URL of an already-stored blob at this path, or null. */
+export async function findBlob(filename: string): Promise<string | null> {
+  const pathname = `wardrobe-knight/${filename}`;
+  const { blobs } = await list({ prefix: pathname, limit: 1 });
+  const hit = blobs.find((b) => b.pathname === pathname);
+  return hit ? hit.url : null;
+}
 
 export async function uploadImageFromUrl(
   sourceUrl: string,
