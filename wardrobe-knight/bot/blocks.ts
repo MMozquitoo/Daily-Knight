@@ -6,6 +6,7 @@ import type { ClothingItem } from '../types/wardrobe.js';
 import { categoryFromSheet } from '../types/wardrobe.js';
 import type { OutfitRecommendation, CarryItem } from '../types/outfit.js';
 import type { DayWeather } from '../types/weather.js';
+import type { StatsSummary, StatBucket } from '../services/stats.js';
 import { formatWeatherSlack } from '../services/weather.js';
 
 const CARRY_LABELS: Record<CarryItem, string> = {
@@ -138,6 +139,34 @@ export function outfitMessage(
   ];
 
   return blocks;
+}
+
+export function statsMessage(stats: StatsSummary): object[] {
+  const bar = (p: number) => '█'.repeat(Math.max(1, Math.round(p / 5)));
+  const table = (rows: StatBucket[]) =>
+    rows
+      .filter((r) => r.count > 0)
+      .map((r) => `${r.label.padEnd(16)}${bar(r.pct).padEnd(21)}${String(r.count).padStart(3)}  ${r.pct}%`)
+      .join('\n') || '—';
+
+  const emoji: Record<string, string> = {
+    under: ':small_red_triangle_down:',
+    over: ':small_red_triangle:',
+    warn: ':warning:',
+    ok: ':white_check_mark:',
+  };
+  const insightLines = stats.insights.map((i) => `${emoji[i.kind] ?? '•'} ${i.text}`).join('\n');
+
+  return [
+    { type: 'header', text: { type: 'plain_text', text: ':bar_chart: Stats de ta garde-robe', emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*${stats.total} pièces* au total` } },
+    { type: 'section', text: { type: 'mrkdwn', text: '*Par catégorie*\n```\n' + table(stats.byLayer) + '\n```' } },
+    { type: 'section', text: { type: 'mrkdwn', text: '*Par formalité*\n```\n' + table(stats.byFormality) + '\n```' } },
+    { type: 'section', text: { type: 'mrkdwn', text: '*Par saison*\n```\n' + table(stats.bySeason) + '\n```' } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*État* : ${stats.condition.neuf} neuf · ${stats.condition.bon} bon · ${stats.condition.use} usé` } },
+    { type: 'divider' },
+    { type: 'section', text: { type: 'mrkdwn', text: '*Analyse & benchmarks*\n' + insightLines } },
+  ];
 }
 
 export function savedItemMessage(item: ClothingItem): object[] {

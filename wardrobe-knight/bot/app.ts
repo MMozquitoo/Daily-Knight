@@ -18,8 +18,9 @@ import { todayStr, daysAgo } from '../services/dates.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
 import { askAdvisor, clearHistory } from '../services/advisor.js';
 import { generateTryOn } from '../services/tryon.js';
+import { computeStats } from '../services/stats.js';
 import sharp from 'sharp';
-import { outfitMessage, savedItemMessage, editItemModal, wardrobeList } from './blocks.js';
+import { outfitMessage, savedItemMessage, editItemModal, wardrobeList, statsMessage } from './blocks.js';
 import { afterAck } from './defer.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
@@ -114,6 +115,18 @@ app.command('/armoire', async ({ ack, respond }) => {
       await respond({ blocks: wardrobeList(items) as any });
     } catch (err) {
       await respond(`:x: Erreur lors de la lecture de l'armoire : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
+});
+
+app.command('/stats', async ({ ack, respond }) => {
+  await ack();
+  afterAck(async () => {
+    try {
+      const items = await sheets.getAll();
+      await respond({ blocks: statsMessage(computeStats(items)) as any });
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
   });
 });
@@ -272,6 +285,7 @@ const GREETING_PATTERN = /^(bonjour|salut|hello|hey|hi|coucou|bonsoir)\b/i;
 const ARMOIRE_PATTERN = /armoire|armario|wardrobe|garde-?robe|voir.*vêtements|mes\s+vêtements/i;
 const AGENDA_PATTERN = /agenda|calendrier|calendar|réunion|événements|eventos/i;
 const METEO_PATTERN = /météo|meteo|weather|temps\s+qu'il\s+fait|clima/i;
+const STATS_PATTERN = /\bstats?\b|statistiques?|estad[íi]sticas?/i;
 const HELP_PATTERN = /aide|help|ayuda|commandes?|commands?|que\s+(sais|peux|puedes)/i;
 
 // Handle file_share subtype (Slack sends photos as messages with this subtype)
@@ -384,12 +398,23 @@ app.message(async ({ message, say }) => {
     return;
   }
 
+  if (STATS_PATTERN.test(text)) {
+    try {
+      const items = await sheets.getAll();
+      await say({ blocks: statsMessage(computeStats(items)) as any });
+    } catch (err) {
+      await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+    return;
+  }
+
   if (HELP_PATTERN.test(text)) {
     await say(`:magic_wand: *Mage Stylist — Commandes*\n\n`
       + `• *« je mets quoi ? »* ou */outfit* — Tenue du jour\n`
       + `• *« armoire »* ou */armoire* — Voir tes vêtements\n`
       + `• *« agenda »* ou */agenda* — Événements du jour\n`
       + `• *« météo »* ou */meteo* — Météo du jour\n`
+      + `• *« stats »* ou */stats* — Analyse de ta garde-robe\n`
       + `• *« ajoute [vêtement] »* — Ajouter un vêtement\n`
       + `• *:camera: Envoie une photo* — Ajouter un vêtement par photo\n`
       + `• *« aide »* — Ce message`);
