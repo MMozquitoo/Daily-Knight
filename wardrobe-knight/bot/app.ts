@@ -1,5 +1,5 @@
 /**
- * Wardrobe Knight — Slack Bot App
+ * Mage Stylist — Slack Bot App
  *
  * Shared Slack Bolt app definition for both local HTTP development and Vercel.
  */
@@ -384,7 +384,7 @@ app.message(async ({ message, say }) => {
   }
 
   if (HELP_PATTERN.test(text)) {
-    await say(`:shield: *Wardrobe Knight — Commandes*\n\n`
+    await say(`:magic_wand: *Mage Stylist — Commandes*\n\n`
       + `• *« je mets quoi ? »* ou */outfit* — Tenue du jour\n`
       + `• *« armoire »* ou */armoire* — Voir tes vêtements\n`
       + `• *« agenda »* ou */agenda* — Événements du jour\n`
@@ -398,7 +398,7 @@ app.message(async ({ message, say }) => {
   if (isDM(message)) {
     if (GREETING_PATTERN.test(text)) {
       try {
-        await say(':shield: Bonjour ! Voici ta tenue du jour :');
+        await say(':magic_wand: Bonjour ! Voici ta tenue du jour :');
         await generateAndSendOutfit(say);
       } catch (err) {
         await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);

@@ -91,7 +91,7 @@ export default async function handler(req: Request, res: Response): Promise<void
     // cooldown, and the user got nothing to wear either way.
     await slack.chat.postMessage({
       channel: SLACK_USER_ID,
-      text: ':shield: Bonjour ! Voici ta tenue du jour :',
+      text: ':magic_wand: Bonjour ! Voici ta tenue du jour :',
       blocks: outfitMessage(recommendation, items, weather) as any,
     });
 

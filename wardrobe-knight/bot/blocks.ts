@@ -63,7 +63,7 @@ export function outfitMessage(
   const blocks: object[] = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: ':shield: Ta tenue du jour', emoji: true },
+      text: { type: 'plain_text', text: ':magic_wand: Ta tenue du jour', emoji: true },
     },
     {
       type: 'section',
