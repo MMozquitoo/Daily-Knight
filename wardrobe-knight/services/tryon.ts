@@ -110,9 +110,13 @@ export async function generateOutfitLook(
   if (!top.imageUrl || !bottom.imageUrl) return null;
 
   const base = `tryon/look-${top.id}-${bottom.id}`;
-  const step1 = await runTryonToPath(top, undefined, `${base}-top.png`);
+  // Bottom first, then the top over it. If we did the top first, a strongly
+  // coloured top bled its colour into the trousers on the second (lower-body)
+  // pass. Setting the trousers first and finishing with the upper body keeps
+  // both colours true.
+  const step1 = await runTryonToPath(bottom, undefined, `${base}-bottom.png`);
   if (!step1) return null;
-  return runTryonToPath(bottom, step1, `${base}.png`);
+  return runTryonToPath(top, step1, `${base}.png`);
 }
 
 /** Create a prediction without waiting (returns prediction ID) */
