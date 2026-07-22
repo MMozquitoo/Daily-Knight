@@ -9,6 +9,8 @@ import {
   ACCESSORY_SCORE_MIN,
   CONDITION_MULTIPLIER,
   CONTEXT_SCORES,
+  FEEDBACK_CAP,
+  FEEDBACK_STEP,
   FORMALITY_SCORES,
   HOT_TEMP,
   STYLE_SCORES,
@@ -86,10 +88,19 @@ function getCooldownMultiplier(itemId: string, recentlyWorn?: Map<string, number
   return 1;
 }
 
+/** Net 👍/👎 votes → a bounded point shift added before the multipliers. */
+function getFeedbackBonus(itemId: string, feedbackScores?: Map<string, number>): number {
+  if (!feedbackScores) return 0;
+  const net = feedbackScores.get(itemId);
+  if (!net) return 0;
+  return Math.max(-FEEDBACK_CAP, Math.min(FEEDBACK_CAP, net * FEEDBACK_STEP));
+}
+
 export function scoreItems(
   items: WardrobeItem[],
   context: DailyContext,
   recentlyWorn?: Map<string, number>,
+  feedbackScores?: Map<string, number>,
 ): ScoredItem[] {
   return items
     .map((item) => {
@@ -101,10 +112,11 @@ export function scoreItems(
       };
       const rawScore = breakdown.weather + breakdown.formality + breakdown.context + breakdown.style;
       const wear = CONDITION_MULTIPLIER[item.condition] ?? 1;
+      const feedback = getFeedbackBonus(item.id, feedbackScores);
       return {
         item,
         breakdown,
-        score: rawScore * getCooldownMultiplier(item.id, recentlyWorn) * wear,
+        score: Math.max(0, rawScore + feedback) * getCooldownMultiplier(item.id, recentlyWorn) * wear,
       };
     })
     .filter((entry) => {

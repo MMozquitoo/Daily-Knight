@@ -147,9 +147,10 @@ export function generateOutfit(
   items: WardrobeItem[],
   context: DailyContext,
   recentlyWorn?: Map<string, number>,
+  feedbackScores?: Map<string, number>,
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
   const outfit = findValidOutfit(scoredItems, context);
   return toRecommendation(outfit, context);
 }
@@ -159,9 +160,10 @@ export function regenerateOutfit(
   context: DailyContext,
   excludeItemIds: string[] = [],
   recentlyWorn?: Map<string, number>,
+  feedbackScores?: Map<string, number>,
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
   const outfit = findValidOutfit(scoredItems, context, { excludedItemIds: excludeItemIds });
   return toRecommendation(outfit, context);
 }
@@ -172,11 +174,12 @@ export function swapLayer(
   current: OutfitRecommendation,
   layer: OutfitLayer,
   recentlyWorn?: Map<string, number>,
+  feedbackScores?: Map<string, number>,
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
   // Honour the cooldown here too, or swapping can surface yesterday's item that
   // generateOutfit/regenerateOutfit would have suppressed.
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
   const lockedLayerIds: Record<string, string | undefined> = {
     top: current.wear.top,
     bottom: current.wear.bottom,

@@ -61,10 +61,11 @@ function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
 }
 
 async function getOutfitContext() {
-  const [agenda, items, wornHistory] = await Promise.all([
+  const [agenda, items, wornHistory, feedbackScores] = await Promise.all([
     fetchTodayAgenda(),
     sheets.getAll(),
     sheets.getWornRecently(7),
+    sheets.getFeedbackScores().catch(() => new Map<string, number>()),
   ]);
 
   // The agenda decides where the day happens, so it has to come first
@@ -79,7 +80,7 @@ async function getOutfitContext() {
   const context = buildDailyContext(weather, agenda, 'mixed', place.name);
   const recentlyWorn = buildCooldownMap(wornHistory);
 
-  return { weather, agenda, items, wardrobeItems, context, recentlyWorn };
+  return { weather, agenda, items, wardrobeItems, context, recentlyWorn, feedbackScores };
 }
 
 app.command('/outfit', async ({ ack, respond }) => {
@@ -89,8 +90,8 @@ app.command('/outfit', async ({ ack, respond }) => {
   await ack();
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -151,8 +152,8 @@ function isDM(message: { channel_type?: string }): boolean {
 
 
 async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
-  const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
-  const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+  const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
+  const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
   lastRecommendation = recommendation;
   await sheets.logWorn(todayStr(), {
     top: recommendation.wear.top,
@@ -457,12 +458,12 @@ app.action('regenerate_outfit', async ({ ack, respond, action }) => {
   const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
       // The shown outfit rides in the button value, so regenerate works on any cold
       // serverless instance — lastRecommendation module state is often null there,
       // which used to make "regenerate" return the same outfit.
       const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
-      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn);
+      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn, feedbackScores);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -481,9 +482,9 @@ app.action('more_formal', async ({ ack, respond }) => {
   await ack();
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn } = await getOutfitContext();
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
       context.agenda = { ...context.agenda, highestFormality: 'formal' };
-      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -508,6 +509,25 @@ app.action('view_agenda', async ({ ack, respond }) => {
       await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
   });
+});
+
+app.action('item_feedback', async ({ ack, respond, action }) => {
+  await ack();
+  try {
+    const value = (action as { selected_option?: { value?: string } }).selected_option?.value ?? '';
+    const [kind, itemId] = value.split(':');
+    if (!itemId || (kind !== 'like' && kind !== 'dislike')) return;
+    await sheets.logFeedback(itemId, kind === 'like' ? 1 : -1);
+    await respond({
+      response_type: 'ephemeral',
+      replace_original: false,
+      text: kind === 'like'
+        ? ':+1: Bien noté — je te le proposerai plus souvent.'
+        : ':-1: Bien noté — je te le proposerai moins.',
+    });
+  } catch (err) {
+    console.error('[ITEM_FEEDBACK]', err);
+  }
 });
 
 const loadingModal = (text: string) => ({

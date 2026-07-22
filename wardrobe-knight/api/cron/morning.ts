@@ -53,10 +53,11 @@ export default async function handler(req: Request, res: Response): Promise<void
     // Check for pre-planned outfit first
     const planned = await getPlannedOutfit(todayStr()).catch(() => null);
 
-    const [agenda, items, wornHistory] = await Promise.all([
+    const [agenda, items, wornHistory, feedbackScores] = await Promise.all([
       fetchTodayAgenda(),
       sheets.getAll(),
       sheets.getWornRecently(7),
+      sheets.getFeedbackScores().catch(() => new Map<string, number>()),
     ]);
 
     // Dress for where the day happens, not for the bedroom window
@@ -83,7 +84,7 @@ export default async function handler(req: Request, res: Response): Promise<void
       const wardrobeItems = toWardrobeItems(items);
       const context = buildDailyContext(weather, agenda, 'mixed', place.name);
       const recentlyWorn = buildCooldownMap(wornHistory);
-      recommendation = generateOutfit(wardrobeItems, context, recentlyWorn);
+      recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
     }
 
     // Deliver first, then log. If the post fails, the day should not be recorded

@@ -13,12 +13,14 @@ import { google } from 'googleapis';
 import type { ClothingItem } from '../types/wardrobe.js';
 import { CATEGORY_PREFIXES } from '../types/wardrobe.js';
 import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
-import { daysAgo } from './dates.js';
+import { daysAgo, todayStr } from './dates.js';
 
 const SHEET_NAME = 'Armoire';
 const RANGE = `${SHEET_NAME}!A:R`; // 18 columns A–R (P = image URL, Q = try-on URL, R = product image URL)
 const HISTORY_SHEET = 'Historique';
 const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
+const FEEDBACK_SHEET = 'Feedback';
+const FEEDBACK_RANGE = `${FEEDBACK_SHEET}!A:C`; // Date | ItemID | Vote (+1 / -1)
 
 function getAuth() {
   return new google.auth.GoogleAuth({
@@ -370,4 +372,67 @@ export async function getWornRecently(days: number = 7): Promise<WornEntry[]> {
       shoes: row[3] || undefined,
       outerwear: row[4] || undefined,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Feedback ("Feedback" tab) — 👍/👎 per item, summed into a preference signal
+// ---------------------------------------------------------------------------
+
+let feedbackSheetReady = false;
+
+async function ensureFeedbackSheet(): Promise<void> {
+  if (feedbackSheetReady) return;
+  const sheets = getSheets();
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId(),
+      requestBody: { requests: [{ addSheet: { properties: { title: FEEDBACK_SHEET } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${FEEDBACK_SHEET}!A1:C1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['Date', 'ItemID', 'Vote']] },
+    });
+    feedbackSheetReady = true;
+  } catch (err: any) {
+    if (err?.message?.includes('already exists')) {
+      feedbackSheetReady = true;
+      return;
+    }
+    throw err;
+  }
+}
+
+/** Record one 👍 (+1) or 👎 (-1) vote for an item. Each vote is its own row. */
+export async function logFeedback(itemId: string, vote: 1 | -1): Promise<void> {
+  await ensureFeedbackSheet();
+  return serialise(async () => {
+    const sheets = getSheets();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId(),
+      range: FEEDBACK_RANGE,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[todayStr(), itemId, String(vote)]] },
+    });
+  });
+}
+
+/** Net feedback per item (sum of votes). Positive = liked, negative = disliked. */
+export async function getFeedbackScores(): Promise<Map<string, number>> {
+  await ensureFeedbackSheet();
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId(),
+    range: FEEDBACK_RANGE,
+  });
+  const rows = res.data.values ?? [];
+  const scores = new Map<string, number>();
+  for (const row of rows.slice(1)) {
+    const id = row[1];
+    const vote = parseInt(row[2] ?? '0', 10);
+    if (!id || isNaN(vote)) continue;
+    scores.set(id, (scores.get(id) ?? 0) + vote);
+  }
+  return scores;
 }

@@ -72,3 +72,13 @@ export const STYLE_SCORES = {
   adjacent: 6,
   mismatch: 2,
 } as const;
+
+/**
+ * Feedback (👍/👎) tuning.
+ *
+ * Each net vote on an item shifts its score by FEEDBACK_STEP points, bounded by
+ * ±FEEDBACK_CAP — so a strong opinion nudges the ranking without ever overriding
+ * a good weather/formality fit. Applied before the cooldown/condition multipliers.
+ */
+export const FEEDBACK_STEP = 5;
+export const FEEDBACK_CAP = 20;

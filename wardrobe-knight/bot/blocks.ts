@@ -34,13 +34,38 @@ export function outfitMessage(
     return `${label} : *${itemDisplayName(item)}* — ${item.couleur}${item.matiere ? ', ' + item.matiere : ''}`;
   }
 
-  const wearLines = [
-    itemLine(recommendation.wear.top, ':shirt: Haut'),
-    itemLine(recommendation.wear.bottom, ':jeans: Bas'),
-    itemLine(recommendation.wear.shoes, ':athletic_shoe: Chaussures'),
-    recommendation.wear.outerwear ? itemLine(recommendation.wear.outerwear, ':coat: Veste') : '',
-    ...recommendation.wear.accessories.map((id) => itemLine(id, ':ring: Acc')),
-  ].filter(Boolean);
+  // Each main piece gets its own line with a 👍/👎 overflow, so Mage Stylist learns
+  // which garments the user actually likes and weights them next time.
+  const feedbackLayers: { id?: string; label: string }[] = [
+    { id: recommendation.wear.top, label: ':shirt: Haut' },
+    { id: recommendation.wear.bottom, label: ':jeans: Bas' },
+    { id: recommendation.wear.shoes, label: ':athletic_shoe: Chaussures' },
+    { id: recommendation.wear.outerwear, label: ':coat: Veste' },
+  ];
+  const wearBlocks: object[] = [
+    { type: 'section', text: { type: 'mrkdwn', text: '*PORTER*' } },
+  ];
+  for (const { id, label } of feedbackLayers) {
+    if (!id) continue;
+    wearBlocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: itemLine(id, label) },
+      accessory: {
+        type: 'overflow',
+        action_id: 'item_feedback',
+        options: [
+          { text: { type: 'plain_text', text: "👍 J'aime", emoji: true }, value: `like:${id}` },
+          { text: { type: 'plain_text', text: '👎 Bof', emoji: true }, value: `dislike:${id}` },
+        ],
+      },
+    });
+  }
+  const accLines = recommendation.wear.accessories
+    .map((id) => itemLine(id, ':ring: Acc'))
+    .filter(Boolean);
+  if (accLines.length) {
+    wearBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: accLines.join('\n') } });
+  }
 
   const carryLines = recommendation.carry.length > 0
     ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
@@ -70,10 +95,7 @@ export function outfitMessage(
       text: { type: 'mrkdwn', text: formatWeatherSlack(weather) },
     },
     { type: 'divider' },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: '*PORTER*\n' + wearLines.join('\n') },
-    },
+    ...wearBlocks,
     {
       type: 'section',
       text: { type: 'mrkdwn', text: '*EMPORTER*\n' + carryLines },
