@@ -38,18 +38,30 @@ export function requireSecret(req: Request, res: Response): boolean {
 }
 
 /**
- * Allow only Vercel's scheduler (or a call carrying the shared secret, for manual
- * runs). Vercel attaches `x-vercel-cron: 1` to scheduled invocations and this
- * header cannot be set by an external HTTP caller reaching the function.
+ * Allow only Vercel's scheduler (or a call carrying a shared secret, for manual
+ * runs).
+ *
+ * The primary check is Vercel's documented mechanism: when a `CRON_SECRET` env
+ * var exists, Vercel sends `Authorization: Bearer ${CRON_SECRET}` on every
+ * scheduled invocation. We rely on that rather than the `x-vercel-cron` header —
+ * that header turned out not to reach the function reliably here (the guard was
+ * 401-ing real scheduled runs, which silently killed the daily outfit for a
+ * week). `x-vercel-cron` is kept only as a best-effort fallback.
+ *
+ * `API_SECRET` is also accepted so a human can trigger a run by hand.
  */
 export function requireCron(req: Request, res: Response): boolean {
-  if (req.headers['x-vercel-cron']) return true;
-
-  // Manual trigger with the secret is fine; anonymous is not
-  const expected = process.env.API_SECRET;
   const header = req.headers.authorization ?? '';
   const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (expected && bearer === expected) return true;
+
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && bearer === cronSecret) return true;
+
+  const apiSecret = process.env.API_SECRET;
+  if (apiSecret && bearer === apiSecret) return true;
+
+  // Best-effort fallback for platforms that do set the header.
+  if (req.headers['x-vercel-cron']) return true;
 
   res.status(401).json({ error: 'Unauthorized' });
   return false;
