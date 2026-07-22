@@ -11,11 +11,14 @@ import { fetchWeather, getUserLocation } from '../../services/weather.js';
 import { resolveDayPlace } from '../../services/destination.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
 import { todayStr, daysAgo } from '../../services/dates.js';
-import { outfitMessage } from '../../bot/blocks.js';
+import { outfitMessage, tryonMessage } from '../../bot/blocks.js';
+import { generateOutfitLook } from '../../services/tryon.js';
 
 export const config = {
   runtime: 'nodejs',
-  maxDuration: 30,
+  // Bumped for the virtual try-on: two chained IDM-VTON passes (~40-50s) run after
+  // the outfit is posted. Well under the outfit itself, which is sent first.
+  maxDuration: 60,
 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
@@ -131,6 +134,26 @@ export default async function handler(req: Request, res: Response): Promise<void
           text: ':couch_and_lamp: Bon weekend ! Journée pyjama autorisée :wink:',
         });
       }
+    }
+
+    // Virtual try-on, best-effort and last (it's the slow part). Only fires for
+    // closed tops — generateOutfitLook returns null otherwise, so open-shirt days
+    // just skip it rather than showing a mangled render.
+    try {
+      const topItem = items.find((i) => i.id === recommendation.wear.top);
+      const bottomItem = items.find((i) => i.id === recommendation.wear.bottom);
+      if (topItem && bottomItem) {
+        const look = await generateOutfitLook(topItem, bottomItem);
+        if (look) {
+          await slack.chat.postMessage({
+            channel: SLACK_USER_ID,
+            text: ':sparkles: Essai virtuel du jour',
+            blocks: tryonMessage(look) as any,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[CRON MORNING TRYON]', err);
     }
 
     res.status(200).json({ ok: true, date: todayStr() });

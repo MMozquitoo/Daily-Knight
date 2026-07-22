@@ -61,6 +61,60 @@ export async function generateTryOn(
   return uploadImageFromUrl(tempUrl, `tryon/${item.id}.png`);
 }
 
+/** Run one IDM-VTON pass and persist to a specific Blob path. */
+async function runTryonToPath(
+  item: ClothingItem,
+  humanImg: string | undefined,
+  outPath: string,
+): Promise<string | null> {
+  if (!item.imageUrl) return null;
+  const replicate = getClient();
+  const output = await replicate.run(`cuuupid/idm-vton:${MODEL_VERSION}`, {
+    input: buildInput(item, humanImg),
+  });
+  const tempUrl = extractUrl(output);
+  if (!tempUrl) return null;
+  return uploadImageFromUrl(tempUrl, outPath);
+}
+
+/**
+ * Whether a top renders cleanly in IDM-VTON.
+ *
+ * The model handles closed, single-layer garments (tees, polos, crew sweaters,
+ * pull-over hoodies) well, but mangles open/layered pieces — an open shirt over a
+ * tee comes out with a floating collar. We only try-on the tops that look good.
+ */
+export function isTryonFriendlyTop(item: ClothingItem): boolean {
+  const cat = item.categorie.toLowerCase();
+  const sub = item.sousCategorie.toLowerCase();
+  const s = `${cat} ${sub}`;
+  if (/t-?shirt|polo/.test(s)) return true;               // single-layer, always clean
+  if (/sweater|pull|maille|knit/.test(cat) || /col rond|crew|col roulé/.test(sub)) {
+    return !/cardigan/.test(sub);                         // cardigans are open
+  }
+  if (/hoodie|sweat/.test(cat)) return !/zip/.test(sub);   // zip hoodies get worn open
+  return false;                                            // chemises, overshirts, etc.
+}
+
+/**
+ * Compose a full-look try-on: the top on the base photo, then the bottom on top of
+ * that. Returns null when the top isn't try-on friendly, a piece has no image, or
+ * Replicate isn't configured. Best-effort — callers must tolerate null.
+ */
+export async function generateOutfitLook(
+  top: ClothingItem,
+  bottom: ClothingItem,
+): Promise<string | null> {
+  if (!process.env.REPLICATE_API_TOKEN || !process.env.TRYON_BASE_IMAGE) return null;
+  if (!isTryonFriendlyTop(top)) return null;
+  if (!top.imageUrl || !bottom.imageUrl) return null;
+
+  const base = `tryon/look-${top.id}-${bottom.id}`;
+  const step1 = await runTryonToPath(top, undefined, `${base}-top.png`);
+  if (!step1) return null;
+  return runTryonToPath(bottom, step1, `${base}.png`);
+}
+
 /** Create a prediction without waiting (returns prediction ID) */
 export async function createTryOnPrediction(
   item: ClothingItem,

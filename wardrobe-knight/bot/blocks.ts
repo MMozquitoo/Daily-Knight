@@ -141,6 +141,16 @@ export function outfitMessage(
   return blocks;
 }
 
+export function tryonMessage(imageUrl: string): object[] {
+  return [
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: ':sparkles: *Essai virtuel* — à quoi ça ressemble sur toi :' },
+    },
+    { type: 'image', image_url: imageUrl, alt_text: 'Essai virtuel de la tenue' },
+  ];
+}
+
 export function statsMessage(stats: StatsSummary): object[] {
   const bar = (p: number) => '█'.repeat(Math.max(1, Math.round(p / 5)));
   const table = (rows: StatBucket[]) =>
