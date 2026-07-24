@@ -14,13 +14,14 @@ import * as sheets from '../services/sheets.js';
 import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
 import { resolveDayPlace } from '../services/destination.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
-import { todayStr, daysAgo } from '../services/dates.js';
+import { todayStr } from '../services/dates.js';
 import { parseAddItem, parseAddItemFromImage, isAddItemIntent } from '../services/parser.js';
 import { askAdvisor, clearHistory } from '../services/advisor.js';
-import { generateTryOn } from '../services/tryon.js';
+import { generateTryOn, generateFullLook } from '../services/tryon.js';
+import { transcribeAudio } from '../services/transcribe.js';
 import { computeStats } from '../services/stats.js';
 import sharp from 'sharp';
-import { outfitMessage, savedItemMessage, editItemModal, wardrobeList, statsMessage } from './blocks.js';
+import { outfitMessage, savedItemMessage, editItemModal, wardrobeList, statsMessage, tryonMessage } from './blocks.js';
 import { afterAck } from './defer.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
@@ -44,29 +45,13 @@ let lastItems: ClothingItem[] = [];
 let lastWeather: DayWeather | null = null;
 let lastAgenda: AgendaSummary | null = null;
 
-function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
-  const map = new Map<string, number>();
-
-  for (const entry of history) {
-    // Anchored to Europe/Paris, so it agrees with how todayStr() writes the log
-    const daysDiff = daysAgo(entry.date);
-    for (const id of [entry.top, entry.bottom, entry.shoes, entry.outerwear]) {
-      if (!id) continue;
-      const existing = map.get(id);
-      if (existing === undefined || daysDiff < existing) {
-        map.set(id, daysDiff);
-      }
-    }
-  }
-  return map;
-}
-
 async function getOutfitContext() {
-  const [agenda, items, wornHistory, feedbackScores] = await Promise.all([
+  const [agenda, items, wornHistory, feedbackScores, styleRules] = await Promise.all([
     fetchTodayAgenda(),
     sheets.getAll(),
     sheets.getWornRecently(7),
     sheets.getFeedbackScores().catch(() => new Map<string, number>()),
+    sheets.getStyleRules().catch(() => []),
   ]);
 
   // The agenda decides where the day happens, so it has to come first
@@ -79,9 +64,34 @@ async function getOutfitContext() {
 
   const wardrobeItems = toWardrobeItems(items);
   const context = buildDailyContext(weather, agenda, 'mixed', place.name);
-  const recentlyWorn = buildCooldownMap(wornHistory);
+  const recentlyWorn = sheets.buildCooldownMap(wornHistory);
 
-  return { weather, agenda, items, wardrobeItems, context, recentlyWorn, feedbackScores };
+  return { weather, agenda, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules };
+}
+
+/**
+ * Generate the "you wearing it" image and post it as a follow-up. The outfit
+ * message ships text-only first (generation takes ~20-50s uncached, instant when
+ * the nightly cron pre-warmed it) — this fills in the single image the user
+ * actually wants instead of a pile of product shots. Best-effort.
+ */
+async function sendLookFollowUp(
+  recommendation: OutfitRecommendation,
+  items: ClothingItem[],
+  send: (msg: any) => Promise<any>,
+): Promise<void> {
+  try {
+    const top = items.find((i) => i.id === recommendation.wear.top);
+    const bottom = items.find((i) => i.id === recommendation.wear.bottom);
+    const shoes = items.find((i) => i.id === recommendation.wear.shoes);
+    if (!top || !bottom) return;
+    const look = await generateFullLook(top, bottom, shoes);
+    if (look) {
+      await send({ text: ':sparkles: Essai virtuel', blocks: tryonMessage(look) as any });
+    }
+  } catch (err) {
+    console.error('[LOOK FOLLOW-UP]', err);
+  }
 }
 
 app.command('/outfit', async ({ ack, respond }) => {
@@ -91,8 +101,8 @@ app.command('/outfit', async ({ ack, respond }) => {
   await ack();
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
-      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores, styleRules);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -100,7 +110,8 @@ app.command('/outfit', async ({ ack, respond }) => {
         shoes: recommendation.wear.shoes,
         outerwear: recommendation.wear.outerwear,
       });
-      await respond({ blocks: outfitMessage(recommendation, items, weather) as any });
+      await respond({ blocks: outfitMessage(recommendation, items, weather, null) as any });
+      await sendLookFollowUp(recommendation, items, (msg) => respond({ ...msg, replace_original: false }));
     } catch (err) {
       await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
@@ -165,8 +176,8 @@ function isDM(message: { channel_type?: string }): boolean {
 
 
 async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
-  const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
-  const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
+  const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
+  const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores, styleRules);
   lastRecommendation = recommendation;
   await sheets.logWorn(todayStr(), {
     top: recommendation.wear.top,
@@ -174,7 +185,8 @@ async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
     shoes: recommendation.wear.shoes,
     outerwear: recommendation.wear.outerwear,
   });
-  await say({ blocks: outfitMessage(recommendation, items, weather) as any });
+  await say({ blocks: outfitMessage(recommendation, items, weather, null) as any });
+  await sendLookFollowUp(recommendation, items, say);
 }
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -288,7 +300,39 @@ const METEO_PATTERN = /météo|meteo|weather|temps\s+qu'il\s+fait|clima/i;
 const STATS_PATTERN = /\bstats?\b|statistiques?|estad[íi]sticas?/i;
 const HELP_PATTERN = /aide|help|ayuda|commandes?|commands?|que\s+(sais|peux|puedes)/i;
 
-// Handle file_share subtype (Slack sends photos as messages with this subtype)
+function findAudioFile(files: any[]): { id: string; mimetype: string; url_private_download?: string } | undefined {
+  return files.find((f: any) => typeof f.mimetype === 'string' && f.mimetype.startsWith('audio/'));
+}
+
+/**
+ * Voice note → Whisper transcription → the exact same routing as typed text.
+ * The user talks to the bot like a person; the bot answers like it heard them.
+ */
+async function handleVoiceMessage(
+  audioFile: { mimetype: string; url_private_download?: string },
+  say: (msg: any) => Promise<any>,
+  userId: string | undefined,
+  isDirectMessage: boolean,
+): Promise<void> {
+  if (!audioFile.url_private_download) {
+    await say(':x: Je ne peux pas accéder à la note vocale. Vérifie que le bot a le scope `files:read`.');
+    return;
+  }
+
+  await say(':studio_microphone: J\'écoute ta note vocale...');
+  const buffer = await downloadSlackFile(audioFile.url_private_download);
+  const transcript = await transcribeAudio(buffer, audioFile.mimetype);
+
+  if (!transcript) {
+    await say(':x: Je n\'ai pas réussi à comprendre la note vocale. Essaie de nouveau ou écris-moi.');
+    return;
+  }
+
+  await say(`:speech_balloon: _« ${transcript} »_`);
+  await routeTextMessage(transcript, say, userId, isDirectMessage);
+}
+
+// Handle file_share subtype (Slack sends photos and voice notes as messages with this subtype)
 app.event('message', async ({ event, say }) => {
   const msg = event as any;
   if (msg.subtype !== 'file_share') return;
@@ -301,26 +345,37 @@ app.event('message', async ({ event, say }) => {
 
   const files = msg.files ?? [];
   const imageFile = findImageFile(files);
-  if (!imageFile) return;
 
-  try {
-    const userText = msg.text || undefined;
-    await handleImageMessage(imageFile, userText, say, msg.user);
-  } catch (err) {
-    await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+  if (imageFile) {
+    try {
+      const userText = msg.text || undefined;
+      await handleImageMessage(imageFile, userText, say, msg.user);
+    } catch (err) {
+      await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+    return;
+  }
+
+  const audioFile = findAudioFile(files);
+  if (audioFile) {
+    try {
+      await handleVoiceMessage(audioFile, say, msg.user, msg.channel_type === 'im');
+    } catch (err) {
+      await say(`:x: Erreur avec la note vocale : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
   }
 });
 
-app.message(async ({ message, say }) => {
-  // A photo uploaded WITH a caption is delivered to both this handler and the
-  // file_share event handler above. Let that one own it, or the caption gets
-  // processed twice — appending the same item once from the image and once from
-  // the text.
-  if ((message as { subtype?: string }).subtype === 'file_share') return;
-  if (message.type !== 'message' || !('text' in message) || !message.text) return;
-
-  const text = message.text;
-
+/**
+ * Route a user utterance — typed OR transcribed from a voice note — to the right
+ * feature. Single entry point so voice and text always behave identically.
+ */
+async function routeTextMessage(
+  text: string,
+  say: (msg: any) => Promise<any>,
+  userId: string | undefined,
+  isDirectMessage: boolean,
+): Promise<void> {
   if (OUTFIT_PATTERN.test(text) && !FUTURE_PATTERN.test(text)) {
     try {
       await generateAndSendOutfit(say);
@@ -356,8 +411,7 @@ app.message(async ({ message, say }) => {
       const id = await sheets.createItem(fields);
       const item = { ...fields, id } as ClothingItem;
       // Wardrobe changed — drop stale advisor history (see handleImageMessage).
-      const addUserId = 'user' in message ? (message as any).user : undefined;
-      if (addUserId) clearHistory(addUserId);
+      if (userId) clearHistory(userId);
       await say({ blocks: savedItemMessage(item) as any });
     } catch (err) {
       await say(`:x: Erreur d'interprétation : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
@@ -421,7 +475,7 @@ app.message(async ({ message, say }) => {
     return;
   }
 
-  if (isDM(message)) {
+  if (isDirectMessage) {
     if (GREETING_PATTERN.test(text)) {
       try {
         await say(':magic_wand: Bonjour ! Voici ta tenue du jour :');
@@ -432,11 +486,10 @@ app.message(async ({ message, say }) => {
       return;
     }
 
-    const userId = 'user' in message ? (message as any).user : 'unknown';
     try {
       const items = await sheets.getAll();
       const answer = await askAdvisor(
-        userId,
+        userId ?? 'unknown',
         text,
         items,
         lastWeather ?? undefined,
@@ -476,6 +529,18 @@ app.message(async ({ message, say }) => {
       await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
   }
+}
+
+app.message(async ({ message, say }) => {
+  // A photo uploaded WITH a caption is delivered to both this handler and the
+  // file_share event handler above. Let that one own it, or the caption gets
+  // processed twice — appending the same item once from the image and once from
+  // the text.
+  if ((message as { subtype?: string }).subtype === 'file_share') return;
+  if (message.type !== 'message' || !('text' in message) || !message.text) return;
+
+  const userId = 'user' in message ? (message as any).user : undefined;
+  await routeTextMessage(message.text, say, userId, isDM(message));
 });
 
 app.action('regenerate_outfit', async ({ ack, respond, action }) => {
@@ -483,12 +548,12 @@ app.action('regenerate_outfit', async ({ ack, respond, action }) => {
   const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
       // The shown outfit rides in the button value, so regenerate works on any cold
       // serverless instance — lastRecommendation module state is often null there,
       // which used to make "regenerate" return the same outfit.
       const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
-      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn, feedbackScores);
+      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn, feedbackScores, styleRules);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -496,7 +561,8 @@ app.action('regenerate_outfit', async ({ ack, respond, action }) => {
         shoes: recommendation.wear.shoes,
         outerwear: recommendation.wear.outerwear,
       });
-      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
+      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather, null) as any });
+      await sendLookFollowUp(recommendation, items, (msg) => respond({ ...msg, replace_original: false }));
     } catch (err) {
       await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
@@ -507,9 +573,9 @@ app.action('more_formal', async ({ ack, respond }) => {
   await ack();
   afterAck(async () => {
     try {
-      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores } = await getOutfitContext();
+      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
       context.agenda = { ...context.agenda, highestFormality: 'formal' };
-      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
+      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores, styleRules);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
@@ -517,7 +583,8 @@ app.action('more_formal', async ({ ack, respond }) => {
         shoes: recommendation.wear.shoes,
         outerwear: recommendation.wear.outerwear,
       });
-      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather) as any });
+      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather, null) as any });
+      await sendLookFollowUp(recommendation, items, (msg) => respond({ ...msg, replace_original: false }));
     } catch (err) {
       await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
@@ -536,6 +603,7 @@ app.action('view_agenda', async ({ ack, respond }) => {
   });
 });
 
+// Legacy overflow-menu feedback — still handled so votes on old messages land
 app.action('item_feedback', async ({ ack, respond, action }) => {
   await ack();
   try {
@@ -554,6 +622,29 @@ app.action('item_feedback', async ({ ack, respond, action }) => {
     console.error('[ITEM_FEEDBACK]', err);
   }
 });
+
+// Visible 👍/👎 buttons under each piece of the outfit message
+function registerFeedbackButton(actionId: string, vote: 1 | -1) {
+  app.action(actionId, async ({ ack, respond, action }) => {
+    await ack();
+    try {
+      const itemId = 'value' in action ? String(action.value ?? '') : '';
+      if (!itemId) return;
+      await sheets.logFeedback(itemId, vote);
+      await respond({
+        response_type: 'ephemeral',
+        replace_original: false,
+        text: vote === 1
+          ? `:+1: Bien noté pour *${itemId}* — je te le proposerai plus souvent.`
+          : `:-1: Bien noté pour *${itemId}* — je te le proposerai moins.`,
+      });
+    } catch (err) {
+      console.error('[ITEM_FEEDBACK_BTN]', err);
+    }
+  });
+}
+registerFeedbackButton('feedback_like', 1);
+registerFeedbackButton('feedback_dislike', -1);
 
 const loadingModal = (text: string) => ({
   type: 'modal' as const,

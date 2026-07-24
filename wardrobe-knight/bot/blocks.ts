@@ -21,10 +21,19 @@ function itemDisplayName(item: ClothingItem): string {
   return parts.join(' ') || item.id;
 }
 
+/**
+ * The daily outfit message.
+ *
+ * `look` controls the imagery:
+ *   - a URL      → ONE image: the user wearing the whole outfit (the goal state)
+ *   - null       → no images at all (a look is being generated and follows separately)
+ *   - undefined  → legacy per-item product photos (only for callers not yet migrated)
+ */
 export function outfitMessage(
   recommendation: OutfitRecommendation,
   items: ClothingItem[],
   weather: DayWeather,
+  look?: string | null,
 ): object[] {
   const itemMap = new Map(items.map((i) => [i.id, i]));
 
@@ -35,8 +44,9 @@ export function outfitMessage(
     return `${label} : *${itemDisplayName(item)}* — ${item.couleur}${item.matiere ? ', ' + item.matiere : ''}`;
   }
 
-  // Each main piece gets its own line with a 👍/👎 overflow, so Mage Stylist learns
-  // which garments the user actually likes and weights them next time.
+  // Each main piece gets its own line plus visible 👍/👎 buttons, so Mage Stylist
+  // learns which garments the user actually likes and weights them next time. The
+  // buttons used to hide in an overflow "…" menu and nobody found them.
   const feedbackLayers: { id?: string; label: string }[] = [
     { id: recommendation.wear.top, label: ':shirt: Haut' },
     { id: recommendation.wear.bottom, label: ':jeans: Bas' },
@@ -48,18 +58,29 @@ export function outfitMessage(
   ];
   for (const { id, label } of feedbackLayers) {
     if (!id) continue;
-    wearBlocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: itemLine(id, label) },
-      accessory: {
-        type: 'overflow',
-        action_id: 'item_feedback',
-        options: [
-          { text: { type: 'plain_text', text: "👍 J'aime", emoji: true }, value: `like:${id}` },
-          { text: { type: 'plain_text', text: '👎 Bof', emoji: true }, value: `dislike:${id}` },
+    wearBlocks.push(
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: itemLine(id, label) },
+      },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '👍', emoji: true },
+            action_id: 'feedback_like',
+            value: id,
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '👎', emoji: true },
+            action_id: 'feedback_dislike',
+            value: id,
+          },
         ],
       },
-    });
+    );
   }
   const accLines = recommendation.wear.accessories
     .map((id) => itemLine(id, ':ring: Acc'))
@@ -72,17 +93,32 @@ export function outfitMessage(
     ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
     : '_Rien de plus_';
 
-  // Collect images for the outfit (prefer product image > try-on (Blob only) > original photo)
-  const outfitImages: { url: string; alt: string }[] = [];
-  for (const id of [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes, recommendation.wear.outerwear]) {
-    if (!id) continue;
-    const item = itemMap.get(id);
-    if (!item) continue;
-    const imageUrl = item.productUrl
-      || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
-      || item.imageUrl;
-    if (imageUrl) {
-      outfitImages.push({ url: imageUrl, alt: itemDisplayName(item) });
+  // Imagery: the goal is ONE picture of the user wearing the look — never a pile
+  // of product shots. Per-item photos only remain as the legacy fallback.
+  const imageBlocks: object[] = [];
+  if (look) {
+    imageBlocks.push({
+      type: 'image',
+      title: { type: 'plain_text' as const, text: 'Ta tenue sur toi' },
+      image_url: look,
+      alt_text: 'Essai virtuel de la tenue du jour',
+    });
+  } else if (look === undefined) {
+    for (const id of [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes, recommendation.wear.outerwear]) {
+      if (!id) continue;
+      const item = itemMap.get(id);
+      if (!item) continue;
+      const imageUrl = item.productUrl
+        || (item.tryonUrl && !item.tryonUrl.includes('replicate.delivery') ? item.tryonUrl : null)
+        || item.imageUrl;
+      if (imageUrl) {
+        imageBlocks.push({
+          type: 'image',
+          title: { type: 'plain_text' as const, text: itemDisplayName(item) },
+          image_url: imageUrl,
+          alt_text: itemDisplayName(item),
+        });
+      }
     }
   }
 
@@ -105,12 +141,7 @@ export function outfitMessage(
       type: 'section',
       text: { type: 'mrkdwn', text: `*POURQUOI*\n_${recommendation.why}_` },
     },
-    ...outfitImages.map((img) => ({
-      type: 'image',
-      title: { type: 'plain_text' as const, text: img.alt },
-      image_url: img.url,
-      alt_text: img.alt,
-    })),
+    ...imageBlocks,
     { type: 'divider' },
     {
       type: 'actions',

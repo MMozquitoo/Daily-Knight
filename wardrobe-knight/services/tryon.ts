@@ -97,6 +97,71 @@ export function isTryonFriendlyTop(item: ClothingItem): boolean {
 }
 
 /**
+ * ONE image of the user wearing the whole outfit — the deliverable of the daily
+ * message. Nano Banana (Gemini image editing) first: it composes every layer in a
+ * single pass and handles the open shirts and overshirts that IDM-VTON mangles,
+ * which is why shirt days used to ship with no image at all. Falls back to the
+ * two-pass IDM-VTON chain when it fails, and to null when nothing works.
+ */
+export async function generateFullLook(
+  top: ClothingItem,
+  bottom: ClothingItem,
+  shoes?: ClothingItem,
+): Promise<string | null> {
+  if (!process.env.REPLICATE_API_TOKEN || !process.env.TRYON_BASE_IMAGE) return null;
+  if (!top.imageUrl || !bottom.imageUrl) return null;
+
+  const path = `tryon/full-${top.id}-${bottom.id}${shoes?.imageUrl ? `-${shoes.id}` : ''}.png`;
+  // Instant when pre-generated — the nightly cron warms this.
+  const cached = await findBlob(path).catch(() => null);
+  if (cached) return cached;
+
+  try {
+    const generated = await generateLookNanoBanana(top, bottom, shoes, path);
+    if (generated) return generated;
+  } catch (err) {
+    console.error('[TRYON NANO-BANANA]', err);
+  }
+
+  try {
+    return await generateOutfitLook(top, bottom);
+  } catch (err) {
+    console.error('[TRYON FALLBACK]', err);
+    return null;
+  }
+}
+
+async function generateLookNanoBanana(
+  top: ClothingItem,
+  bottom: ClothingItem,
+  shoes: ClothingItem | undefined,
+  outPath: string,
+): Promise<string | null> {
+  const replicate = getClient();
+  const images = [process.env.TRYON_BASE_IMAGE!, top.imageUrl!, bottom.imageUrl!];
+  const garments = [
+    `as the top: ${buildGarmentDescription(top)}`,
+    `as the bottoms: ${buildGarmentDescription(bottom)}`,
+  ];
+  if (shoes?.imageUrl) {
+    images.push(shoes.imageUrl);
+    garments.push(`as the shoes: ${buildGarmentDescription(shoes)}`);
+  }
+  const prompt =
+    `Dress the man from the first photo in the garments shown in the following photos — ` +
+    `${garments.join('; ')}. Keep his face, hair, body, pose and the background of the ` +
+    `first photo exactly as they are. The clothes must keep their true colours, patterns ` +
+    `and fit. Full-body, photorealistic.`;
+
+  const output = await replicate.run('google/nano-banana', {
+    input: { prompt, image_input: images, output_format: 'png' },
+  });
+  const tempUrl = extractUrl(output);
+  if (!tempUrl) return null;
+  return uploadImageFromUrl(String(tempUrl), outPath);
+}
+
+/**
  * Compose a full-look try-on: the top on the base photo, then the bottom on top of
  * that. Returns null when the top isn't try-on friendly, a piece has no image, or
  * Replicate isn't configured. Best-effort — callers must tolerate null.

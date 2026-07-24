@@ -3,43 +3,62 @@ import { requireCron } from '../_auth.js';
 import { WebClient } from '@slack/web-api';
 import { generateOutfit } from '../../engine/index.js';
 import { buildDailyContext } from '../../engine/context.js';
+import { ruleApplies, ruleTargets } from '../../engine/utils.js';
 import { toWardrobeItems } from '../../types/adapter.js';
+import type { DailyContext } from '../../types/context.js';
+import type { StyleRule } from '../../types/rules.js';
+import type { WardrobeItem } from '../../types/wardrobe.js';
 import * as sheets from '../../services/sheets.js';
 import * as memory from '../../services/memory.js';
 import { getPlannedOutfit } from '../../services/planner.js';
-import { fetchWeather, getUserLocation } from '../../services/weather.js';
+import { getUserLocation } from '../../services/weather.js';
 import { resolveDayPlace } from '../../services/destination.js';
 import { fetchTodayAgenda } from '../../services/calendar.js';
-import { todayStr, daysAgo } from '../../services/dates.js';
-import { outfitMessage, tryonMessage } from '../../bot/blocks.js';
-import { generateOutfitLook } from '../../services/tryon.js';
+import { todayStr } from '../../services/dates.js';
+import { outfitMessage } from '../../bot/blocks.js';
+import { generateFullLook } from '../../services/tryon.js';
 
 export const config = {
   runtime: 'nodejs',
-  // Bumped for the virtual try-on: two chained IDM-VTON passes (~40-50s) run after
-  // the outfit is posted. Well under the outfit itself, which is sent first.
+  // Bumped for the virtual try-on: the full-look render (~20-50s uncached, instant
+  // when the evening cron pre-warmed it) runs BEFORE the outfit is posted so the
+  // message ships with its single image.
   maxDuration: 60,
 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 
+/** Give up on the look render before the cron budget does. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
 
-
-function buildCooldownMap(history: sheets.WornEntry[]): Map<string, number> {
-  const map = new Map<string, number>();
-
-  for (const entry of history) {
-    // Anchored to Europe/Paris, so it agrees with how todayStr() writes the log
-    const daysDiff = daysAgo(entry.date);
-    for (const id of [entry.top, entry.bottom, entry.shoes, entry.outerwear]) {
-      if (!id) continue;
-      const existing = map.get(id);
-      if (existing === undefined || daysDiff < existing) {
-        map.set(id, daysDiff);
+/**
+ * A plan is written on Sunday; a rule can be spoken on Wednesday. If the planned
+ * outfit breaks a rule that is in force today, the plan loses and the engine
+ * regenerates fresh — otherwise "the bot doesn't learn" is literally true until
+ * next Sunday.
+ */
+function plannedViolatesRules(
+  plannedIds: (string | undefined)[],
+  wardrobeItems: WardrobeItem[],
+  context: DailyContext,
+  styleRules: StyleRule[],
+): boolean {
+  for (const id of plannedIds) {
+    if (!id) continue;
+    const item = wardrobeItems.find((i) => i.id === id);
+    if (!item) continue;
+    for (const rule of styleRules) {
+      if (rule.action === 'eviter' && ruleApplies(rule, context) && ruleTargets(rule, item)) {
+        return true;
       }
     }
   }
-  return map;
+  return false;
 }
 
 export default async function handler(req: Request, res: Response): Promise<void> {
@@ -56,20 +75,26 @@ export default async function handler(req: Request, res: Response): Promise<void
     // Check for pre-planned outfit first
     const planned = await getPlannedOutfit(todayStr()).catch(() => null);
 
-    const [agenda, items, wornHistory, feedbackScores] = await Promise.all([
+    const [agenda, items, wornHistory, feedbackScores, styleRules] = await Promise.all([
       fetchTodayAgenda(),
       sheets.getAll(),
       sheets.getWornRecently(7),
       sheets.getFeedbackScores().catch(() => new Map<string, number>()),
+      sheets.getStyleRules().catch(() => [] as StyleRule[]),
     ]);
 
     // Dress for where the day happens, not for the bedroom window
     const place = await resolveDayPlace(agenda);
     const weather = place.weather;
 
+    const wardrobeItems = toWardrobeItems(items);
+    const context = buildDailyContext(weather, agenda, 'mixed', place.name);
+    const recentlyWorn = sheets.buildCooldownMap(wornHistory);
+
     let recommendation;
 
-    if (planned && planned.top) {
+    const plannedIds = planned ? [planned.top, planned.bottom, planned.shoes, planned.outerwear] : [];
+    if (planned && planned.top && !plannedViolatesRules(plannedIds, wardrobeItems, context, styleRules)) {
       // Use pre-planned outfit
       recommendation = {
         wear: {
@@ -84,10 +109,24 @@ export default async function handler(req: Request, res: Response): Promise<void
       };
     } else {
       // Generate on the fly
-      const wardrobeItems = toWardrobeItems(items);
-      const context = buildDailyContext(weather, agenda, 'mixed', place.name);
-      const recentlyWorn = buildCooldownMap(wornHistory);
-      recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores);
+      recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores, styleRules);
+    }
+
+    // Render the single "you wearing it" image BEFORE posting — the goal is one
+    // message with one picture of the user in the look, not a pile of product
+    // shots. Usually instant: the evening cron pre-warms the cache. Capped so a
+    // slow render can't eat the whole cron budget; on timeout the message ships
+    // text-only.
+    let look: string | null = null;
+    try {
+      const topItem = items.find((i) => i.id === recommendation.wear.top);
+      const bottomItem = items.find((i) => i.id === recommendation.wear.bottom);
+      const shoesItem = items.find((i) => i.id === recommendation.wear.shoes);
+      if (topItem && bottomItem) {
+        look = await withTimeout(generateFullLook(topItem, bottomItem, shoesItem), 40_000);
+      }
+    } catch (err) {
+      console.error('[CRON MORNING TRYON]', err);
     }
 
     // Deliver first, then log. If the post fails, the day should not be recorded
@@ -96,7 +135,7 @@ export default async function handler(req: Request, res: Response): Promise<void
     await slack.chat.postMessage({
       channel: SLACK_USER_ID,
       text: ':magic_wand: Bonjour ! Voici ta tenue du jour :',
-      blocks: outfitMessage(recommendation, items, weather) as any,
+      blocks: outfitMessage(recommendation, items, weather, look) as any,
     });
 
     await sheets.logWorn(todayStr(), {
@@ -136,27 +175,7 @@ export default async function handler(req: Request, res: Response): Promise<void
       }
     }
 
-    // Virtual try-on, best-effort and last (it's the slow part). Only fires for
-    // closed tops — generateOutfitLook returns null otherwise, so open-shirt days
-    // just skip it rather than showing a mangled render.
-    try {
-      const topItem = items.find((i) => i.id === recommendation.wear.top);
-      const bottomItem = items.find((i) => i.id === recommendation.wear.bottom);
-      if (topItem && bottomItem) {
-        const look = await generateOutfitLook(topItem, bottomItem);
-        if (look) {
-          await slack.chat.postMessage({
-            channel: SLACK_USER_ID,
-            text: ':sparkles: Essai virtuel du jour',
-            blocks: tryonMessage(look) as any,
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[CRON MORNING TRYON]', err);
-    }
-
-    res.status(200).json({ ok: true, date: todayStr() });
+    res.status(200).json({ ok: true, date: todayStr(), look: look ? 'sent' : 'skipped' });
   } catch (err) {
     console.error('[CRON MORNING]', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });

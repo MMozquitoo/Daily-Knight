@@ -1,5 +1,6 @@
 import type { EventTag } from '../types/agenda.js';
 import type { DailyContext } from '../types/context.js';
+import type { StyleRule } from '../types/rules.js';
 import type { FormalityLevel, LayerCategory, PaletteColor, WardrobeItem } from '../types/wardrobe.js';
 
 const FORMALITY_SCALE: Record<FormalityLevel, number> = {
@@ -104,4 +105,35 @@ export function isNeutralColor(color: PaletteColor): boolean {
 
 export function categoryMatchesLayer(item: WardrobeItem, layer: LayerCategory): boolean {
   return item.category === layer || item.layer === layer;
+}
+
+/** A day spent at home: nothing on the calendar sends the user anywhere. */
+export function isHomeDay(context: DailyContext): boolean {
+  return context.agenda.meetingsCount === 0
+    && context.agenda.dayType !== 'office'
+    && context.agenda.dayType !== 'travel';
+}
+
+/** Whether a style rule is in force for today's context. */
+export function ruleApplies(rule: StyleRule, context: DailyContext): boolean {
+  switch (rule.context) {
+    case 'toujours':
+      return true;
+    case 'maison':
+      return isHomeDay(context);
+    case 'bureau':
+      return context.agenda.dayType === 'office'
+        || (context.agenda.meetingsCount > 0 && context.agenda.dayType !== 'travel');
+    case 'voyage':
+      return context.agenda.dayType === 'travel';
+    default:
+      return false;
+  }
+}
+
+/** Whether a rule targets this garment — by engine type ("shirt") or exact ID ("CA-03"). */
+export function ruleTargets(rule: StyleRule, item: WardrobeItem): boolean {
+  const target = rule.target.trim().toLowerCase();
+  if (!target) return false;
+  return item.type === target || item.id.toLowerCase() === target;
 }

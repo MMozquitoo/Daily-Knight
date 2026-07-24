@@ -79,11 +79,13 @@ export async function planWeek(days: number = 7, withTryOn: boolean = false): Pr
   await ensurePlanSheet();
 
   const loc = getUserLocation();
-  const [forecasts, weekAgenda, items, wornHistory] = await Promise.all([
+  const [forecasts, weekAgenda, items, wornHistory, feedbackScores, styleRules] = await Promise.all([
     fetchWeatherForecast(loc.lat, loc.lon, days),
     fetchWeekAgenda(days),
     sheets.getAll(),
     sheets.getWornRecently(days + 7),
+    sheets.getFeedbackScores().catch(() => new Map<string, number>()),
+    sheets.getStyleRules().catch(() => []),
   ]);
 
   const wardrobeItems = toWardrobeItems(items);
@@ -130,7 +132,7 @@ export async function planWeek(days: number = 7, withTryOn: boolean = false): Pr
     let recommendation: OutfitRecommendation;
 
     try {
-      recommendation = generateOutfit(wardrobeItems, context, dayCooldown);
+      recommendation = generateOutfit(wardrobeItems, context, dayCooldown, feedbackScores, styleRules);
     } catch {
       planned.push({
         date: dateStr, dayName: dayName(dateStr),

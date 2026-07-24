@@ -13,11 +13,14 @@ import {
   FEEDBACK_STEP,
   FORMALITY_SCORES,
   HOT_TEMP,
+  RULE_AVOID_PENALTY,
+  RULE_PREFER_BONUS,
   STYLE_SCORES,
   WEATHER_BONUSES,
   WEATHER_WEIGHT,
 } from '../constants/scoring.js';
 import type { DailyContext } from '../types/context.js';
+import type { StyleRule } from '../types/rules.js';
 import type { WardrobeItem } from '../types/wardrobe.js';
 import type { ScoredItem } from './types.js';
 import {
@@ -29,6 +32,8 @@ import {
   isRainyDay,
   isShortsWeather,
   isWindyDay,
+  ruleApplies,
+  ruleTargets,
 } from './utils.js';
 
 function scoreWeather(item: WardrobeItem, context: DailyContext): number {
@@ -96,11 +101,23 @@ function getFeedbackBonus(itemId: string, feedbackScores?: Map<string, number>):
   return Math.max(-FEEDBACK_CAP, Math.min(FEEDBACK_CAP, net * FEEDBACK_STEP));
 }
 
+/** Spoken rules ("pas de chemise à la maison") → a decisive shift when in force today. */
+function getRuleAdjustment(item: WardrobeItem, context: DailyContext, styleRules?: StyleRule[]): number {
+  if (!styleRules?.length) return 0;
+  let adjustment = 0;
+  for (const rule of styleRules) {
+    if (!ruleApplies(rule, context) || !ruleTargets(rule, item)) continue;
+    adjustment += rule.action === 'eviter' ? RULE_AVOID_PENALTY : RULE_PREFER_BONUS;
+  }
+  return adjustment;
+}
+
 export function scoreItems(
   items: WardrobeItem[],
   context: DailyContext,
   recentlyWorn?: Map<string, number>,
   feedbackScores?: Map<string, number>,
+  styleRules?: StyleRule[],
 ): ScoredItem[] {
   return items
     .map((item) => {
@@ -113,10 +130,11 @@ export function scoreItems(
       const rawScore = breakdown.weather + breakdown.formality + breakdown.context + breakdown.style;
       const wear = CONDITION_MULTIPLIER[item.condition] ?? 1;
       const feedback = getFeedbackBonus(item.id, feedbackScores);
+      const rules = getRuleAdjustment(item, context, styleRules);
       return {
         item,
         breakdown,
-        score: Math.max(0, rawScore + feedback) * getCooldownMultiplier(item.id, recentlyWorn) * wear,
+        score: Math.max(0, rawScore + feedback + rules) * getCooldownMultiplier(item.id, recentlyWorn) * wear,
       };
     })
     .filter((entry) => {

@@ -5,7 +5,7 @@ import { detectTrips } from '../../services/calendar.js';
 import { todayStr, localDateStr } from '../../services/dates.js';
 import { geocodeCity, fetchWeatherForecast } from '../../services/weather.js';
 import { planWeek, getPlannedOutfit } from '../../services/planner.js';
-import { generateOutfitLook } from '../../services/tryon.js';
+import { generateFullLook } from '../../services/tryon.js';
 import * as sheets from '../../services/sheets.js';
 import type { ClothingItem } from '../../types/wardrobe.js';
 import { categoryFromSheet } from '../../types/wardrobe.js';
@@ -180,8 +180,9 @@ export default async function handler(req: Request, res: Response): Promise<void
         const items = await sheets.getAll();
         const topItem = items.find((i) => i.id === planned.top);
         const bottomItem = items.find((i) => i.id === planned.bottom);
+        const shoesItem = items.find((i) => i.id === planned.shoes);
         if (topItem && bottomItem) {
-          pregen = await generateOutfitLook(topItem, bottomItem);
+          pregen = await generateFullLook(topItem, bottomItem, shoesItem);
         }
       }
     } catch (err) {

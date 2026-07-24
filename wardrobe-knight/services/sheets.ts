@@ -12,6 +12,7 @@
 import { google } from 'googleapis';
 import type { ClothingItem } from '../types/wardrobe.js';
 import { CATEGORY_PREFIXES } from '../types/wardrobe.js';
+import type { StyleRule } from '../types/rules.js';
 import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
 import { daysAgo, todayStr } from './dates.js';
 
@@ -21,6 +22,8 @@ const HISTORY_SHEET = 'Historique';
 const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
 const FEEDBACK_SHEET = 'Feedback';
 const FEEDBACK_RANGE = `${FEEDBACK_SHEET}!A:C`; // Date | ItemID | Vote (+1 / -1)
+const RULES_SHEET = 'Règles';
+const RULES_RANGE = `${RULES_SHEET}!A:E`; // Date | Contexte | Cible | Action | Note
 
 function getAuth() {
   return new google.auth.GoogleAuth({
@@ -418,6 +421,27 @@ export async function logFeedback(itemId: string, vote: 1 | -1): Promise<void> {
   });
 }
 
+/**
+ * Days-since-worn per item, from the Historique tab. Shared by every caller that
+ * feeds the engine's cooldown — the bot, the crons and the advisor must agree on
+ * what "recently worn" means.
+ */
+export function buildCooldownMap(history: WornEntry[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const entry of history) {
+    // Anchored to Europe/Paris, so it agrees with how todayStr() writes the log
+    const daysDiff = daysAgo(entry.date);
+    for (const id of [entry.top, entry.bottom, entry.shoes, entry.outerwear]) {
+      if (!id) continue;
+      const existing = map.get(id);
+      if (existing === undefined || daysDiff < existing) {
+        map.set(id, daysDiff);
+      }
+    }
+  }
+  return map;
+}
+
 /** Net feedback per item (sum of votes). Positive = liked, negative = disliked. */
 export async function getFeedbackScores(): Promise<Map<string, number>> {
   await ensureFeedbackSheet();
@@ -435,4 +459,79 @@ export async function getFeedbackScores(): Promise<Map<string, number>> {
     scores.set(id, (scores.get(id) ?? 0) + vote);
   }
   return scores;
+}
+
+// ---------------------------------------------------------------------------
+// Style rules ("Règles" tab) — spoken preferences the engine enforces
+// ---------------------------------------------------------------------------
+
+let rulesSheetReady = false;
+
+async function ensureRulesSheet(): Promise<void> {
+  if (rulesSheetReady) return;
+  const sheets = getSheets();
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId(),
+      requestBody: { requests: [{ addSheet: { properties: { title: RULES_SHEET } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId(),
+      range: `${RULES_SHEET}!A1:E1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['Date', 'Contexte', 'Cible', 'Action', 'Note']] },
+    });
+    rulesSheetReady = true;
+  } catch (err: any) {
+    if (err?.message?.includes('already exists')) {
+      rulesSheetReady = true;
+      return;
+    }
+    throw err;
+  }
+}
+
+/** Persist a spoken style rule ("pas de chemise à la maison"). */
+export async function logStyleRule(rule: Omit<StyleRule, 'date'>): Promise<void> {
+  await ensureRulesSheet();
+  return serialise(async () => {
+    const sheets = getSheets();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId(),
+      range: RULES_RANGE,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [[todayStr(), rule.context, rule.target, rule.action, rule.note ?? '']],
+      },
+    });
+  });
+}
+
+const RULE_CONTEXTS = new Set(['maison', 'bureau', 'voyage', 'toujours']);
+const RULE_ACTIONS = new Set(['eviter', 'preferer']);
+
+/** All saved style rules. Rows with an unknown context/action are skipped, not guessed. */
+export async function getStyleRules(): Promise<StyleRule[]> {
+  await ensureRulesSheet();
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId(),
+    range: RULES_RANGE,
+  });
+  const rows = res.data.values ?? [];
+  const rules: StyleRule[] = [];
+  for (const row of rows.slice(1)) {
+    const context = (row[1] ?? '').trim().toLowerCase();
+    const target = (row[2] ?? '').trim();
+    const action = (row[3] ?? '').trim().toLowerCase();
+    if (!target || !RULE_CONTEXTS.has(context) || !RULE_ACTIONS.has(action)) continue;
+    rules.push({
+      date: row[0] ?? '',
+      context: context as StyleRule['context'],
+      target,
+      action: action as StyleRule['action'],
+      note: row[4] || undefined,
+    });
+  }
+  return rules;
 }

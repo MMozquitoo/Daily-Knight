@@ -40,7 +40,7 @@ wardrobe-knight/
 Pure TypeScript — zero framework imports. 6-step pipeline:
 
 1. `filter.ts` — Remove unavailable items, weather/formality mismatches
-2. `scorer.ts` — Rank items: weather (40%), formality (30%), context (20%), style (10%)
+2. `scorer.ts` — Rank items: weather (40%), formality (30%), context (20%), style (10%), plus bounded 👍/👎 feedback shifts and decisive style-rule adjustments ("Règles" tab, e.g. "no shirts on home days")
 3. `assembler.ts` — Pick top-scoring item per layer (top, bottom, shoes, outerwear)
 4. `validator.ts` — Check outfit-level rules (color harmony, formality consistency)
 5. `carry.ts` — Rule-based carry items (umbrella if rain > 30%, etc.)
@@ -56,9 +56,13 @@ The Google Sheets schema uses a 15-column `ClothingItem` type (French UI values,
 
 Built with `@slack/bolt` in Socket Mode. Entry point: `bot/index.ts`.
 
-Slash commands: `/outfit`, `/armoire`, `/agenda`, `/meteo`.
-Natural language: "je mets quoi ?" triggers outfit, "ajoute [vêtement]" triggers add-item flow via Claude API parsing.
-Block Kit messages with action buttons for regenerate, more-formal, view-agenda.
+Slash commands: `/outfit`, `/armoire`, `/agenda`, `/meteo`, `/stats`.
+Natural language: "je mets quoi ?" triggers outfit, "ajoute [vêtement]" triggers add-item flow via Claude API parsing. Voice notes are transcribed (Whisper via Replicate, `services/transcribe.ts`) and routed through the same text pipeline (`routeTextMessage`).
+Block Kit messages with action buttons for regenerate, more-formal, view-agenda, and visible 👍/👎 feedback buttons per piece.
+
+The daily outfit message carries ONE image: the user wearing the full look (`generateFullLook` in `services/tryon.ts` — google/nano-banana on Replicate, IDM-VTON two-pass as fallback). Per-item product photos are legacy-only. The evening cron pre-warms the look for the next morning; interactive flows post the outfit text first and follow up with the image.
+
+Learning: the DM advisor (`services/advisor.ts`) saves structured style rules via its `save_style_rule` tool ("Règles" sheet tab) and can regenerate the day's outfit via `suggest_outfit`. The engine, the crons, and the weekly planner all consume these rules; the morning cron discards a pre-planned outfit that violates a rule now in force.
 
 ### Google Sheets Database (`services/sheets.ts`)
 

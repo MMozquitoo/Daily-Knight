@@ -82,3 +82,14 @@ export const STYLE_SCORES = {
  */
 export const FEEDBACK_STEP = 5;
 export const FEEDBACK_CAP = 20;
+
+/**
+ * Style rules ("Règles" tab) tuning.
+ *
+ * An "éviter" rule is a hard opinion the user stated in words — it has to sink the
+ * item below every rival in its layer, not just nudge it, or the bot looks like it
+ * doesn't listen. It still goes through Math.max(0, …) so an emptied layer can
+ * fall back rather than crash the morning.
+ */
+export const RULE_AVOID_PENALTY = -80;
+export const RULE_PREFER_BONUS = 15;

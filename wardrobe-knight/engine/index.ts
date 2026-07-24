@@ -8,6 +8,7 @@
 
 import type { DailyContext } from '../types/context.js';
 import type { OutfitRecommendation } from '../types/outfit.js';
+import type { StyleRule } from '../types/rules.js';
 import type { LayerCategory, WardrobeItem } from '../types/wardrobe.js';
 import { assembleOutfit } from './assembler.js';
 import { recommendCarry } from './carry.js';
@@ -148,9 +149,10 @@ export function generateOutfit(
   context: DailyContext,
   recentlyWorn?: Map<string, number>,
   feedbackScores?: Map<string, number>,
+  styleRules?: StyleRule[],
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores, styleRules);
   const outfit = findValidOutfit(scoredItems, context);
   return toRecommendation(outfit, context);
 }
@@ -161,9 +163,10 @@ export function regenerateOutfit(
   excludeItemIds: string[] = [],
   recentlyWorn?: Map<string, number>,
   feedbackScores?: Map<string, number>,
+  styleRules?: StyleRule[],
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores, styleRules);
   const outfit = findValidOutfit(scoredItems, context, { excludedItemIds: excludeItemIds });
   return toRecommendation(outfit, context);
 }
@@ -175,11 +178,12 @@ export function swapLayer(
   layer: OutfitLayer,
   recentlyWorn?: Map<string, number>,
   feedbackScores?: Map<string, number>,
+  styleRules?: StyleRule[],
 ): OutfitRecommendation {
   const filteredItems = filterItems(items, context);
   // Honour the cooldown here too, or swapping can surface yesterday's item that
   // generateOutfit/regenerateOutfit would have suppressed.
-  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores);
+  const scoredItems = scoreItems(filteredItems, context, recentlyWorn, feedbackScores, styleRules);
   const lockedLayerIds: Record<string, string | undefined> = {
     top: current.wear.top,
     bottom: current.wear.bottom,

@@ -3,9 +3,16 @@ import type { ClothingItem } from '../types/wardrobe.js';
 import { categoryFromSheet } from '../types/wardrobe.js';
 import type { DayWeather } from '../types/weather.js';
 import type { AgendaSummary } from '../types/agenda.js';
+import type { StyleRule } from '../types/rules.js';
 import * as sheets from './sheets.js';
 import * as memory from './memory.js';
 import { getPlannedOutfit } from './planner.js';
+import { regenerateOutfit } from '../engine/index.js';
+import { buildDailyContext } from '../engine/context.js';
+import { toWardrobeItems } from '../types/adapter.js';
+import { fetchTodayAgenda } from './calendar.js';
+import { resolveDayPlace } from './destination.js';
+import { todayStr } from './dates.js';
 
 let client: Anthropic | null = null;
 
@@ -102,6 +109,20 @@ OUTILS GARDE-ROBE :
 - get_planned_outfit : voir/générer la tenue planifiée pour une date (demain, lundi, etc.).
   → "demain" = date d'aujourd'hui + 1 jour. Calcule la bonne date YYYY-MM-DD.
   → Si le plan n'existe pas, dis à l'utilisateur de lancer /outfit pour le jour même.
+
+OUTILS TENUE & RÈGLES DE STYLE — c'est comme ça que tu APPRENDS :
+- suggest_outfit : génère/régénère la tenue du jour avec le vrai moteur (météo + agenda +
+  règles). Utilise-le dès que l'utilisateur demande une autre tenue, refuse une pièce, ou
+  veut plus casual / plus formel (« régénère », « propose autre chose », « je veux être
+  tranquille aujourd'hui »). Mentionne ensuite chaque pièce par nom + ID — les images
+  s'affichent automatiquement.
+- save_style_rule : TRÈS IMPORTANT. Dès que l'utilisateur exprime une règle vestimentaire
+  durable — « pas de chemise quand je suis à la maison », « jamais de boots l'été », « je
+  préfère les sneakers au bureau » — sauvegarde une règle STRUCTURÉE avec cet outil. C'est
+  la SEULE chose que le moteur du matin lit : un save_memory ne change JAMAIS les tenues
+  proposées. Exemple exact : l'utilisateur dit « pourquoi une chemise, je suis à la maison,
+  je veux être informel » → save_style_rule(context=maison, target=shirt, action=eviter)
+  PUIS suggest_outfit(max_formality=casual, avoid_types=["shirt"]).
 
 OUTILS MÉMOIRE — Tu as une mémoire persistante entre les conversations :
 - save_memory : Sauvegarde une info importante. Types :
@@ -230,6 +251,59 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'save_style_rule',
+    description: "Sauvegarde une règle de style STRUCTURÉE que le moteur de tenues applique automatiquement chaque matin. À utiliser dès que l'utilisateur exprime une préférence vestimentaire durable (ex : « pas de chemise quand je suis à la maison »).",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        context: {
+          type: 'string',
+          enum: ['maison', 'bureau', 'voyage', 'toujours'],
+          description: "Quand la règle s'applique. maison = journée sans rendez-vous.",
+        },
+        target: {
+          type: 'string',
+          description: "Type de vêtement du moteur : shirt, tshirt, sweater, hoodie, pants, jeans, shorts, sneakers, boots, loafers, sandals, jacket, coat, blazer, vest — OU un ID précis (ex : CA-03). « chemise » → shirt.",
+        },
+        action: {
+          type: 'string',
+          enum: ['eviter', 'preferer'],
+          description: 'eviter = ne plus proposer dans ce contexte ; preferer = favoriser.',
+        },
+        note: {
+          type: 'string',
+          description: "La phrase de l'utilisateur, pour mémoire.",
+        },
+      },
+      required: ['context', 'target', 'action'],
+    },
+  },
+  {
+    name: 'suggest_outfit',
+    description: "Génère une nouvelle tenue du jour avec le moteur déterministe (météo réelle + agenda + règles de style + feedback). Utilise quand l'utilisateur demande une tenue, une régénération, ou plus/moins formel. Enregistre aussi la tenue comme portée aujourd'hui.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        max_formality: {
+          type: 'string',
+          enum: ['casual', 'smart', 'formal'],
+          description: "Force le niveau de formalité visé (casual = à la maison / détente).",
+        },
+        avoid_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Types de vêtements à exclure pour CETTE tenue (ex : ["shirt"]).',
+        },
+        exclude_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'IDs précis à exclure (ex : la pièce que l\'utilisateur vient de refuser).',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_planned_outfit',
     description: "Récupère la tenue planifiée pour une date donnée et génère une image try-on si possible. Utilise quand l'utilisateur demande « qu'est-ce que je mets demain ? », « outfit de lundi », etc.",
     input_schema: {
@@ -283,6 +357,80 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
       return memories
         .map((m) => `[${m.date}] (${m.type}) ${m.content}${m.followUpDate ? ` → rappel: ${m.followUpDate}${m.done ? ' (fait)' : ''}` : ''}`)
         .join('\n');
+    }
+    case 'save_style_rule': {
+      await sheets.logStyleRule({
+        context: input.context,
+        target: input.target,
+        action: input.action,
+        note: input.note,
+      });
+      return `Règle sauvegardée : [${input.context}] ${input.action} ${input.target}. Le moteur l'appliquera à chaque tenue.`;
+    }
+    case 'suggest_outfit': {
+      const [agenda, items, wornHistory, feedbackScores, styleRules] = await Promise.all([
+        fetchTodayAgenda(),
+        sheets.getAll(),
+        sheets.getWornRecently(7),
+        sheets.getFeedbackScores().catch(() => new Map<string, number>()),
+        sheets.getStyleRules().catch(() => [] as StyleRule[]),
+      ]);
+      const place = await resolveDayPlace(agenda);
+
+      // A requested formality overrides what the calendar implies — "je veux être
+      // tranquille" beats a work-tagged event.
+      const adjustedAgenda = { ...agenda };
+      if (input.max_formality === 'casual') {
+        adjustedAgenda.highestFormality = 'casual';
+      } else if (input.max_formality === 'smart') {
+        adjustedAgenda.highestFormality = 'work';
+      } else if (input.max_formality === 'formal') {
+        adjustedAgenda.highestFormality = 'formal';
+      }
+
+      const context = buildDailyContext(place.weather, adjustedAgenda, 'mixed', place.name);
+      const wardrobeItems = toWardrobeItems(items);
+      const recentlyWorn = sheets.buildCooldownMap(wornHistory);
+
+      // One-off exclusions ride as ephemeral rules — same mechanism, not persisted
+      const ephemeralRules: StyleRule[] = (input.avoid_types ?? []).map((t: string) => ({
+        date: todayStr(),
+        context: 'toujours' as const,
+        target: t,
+        action: 'eviter' as const,
+      }));
+
+      const recommendation = regenerateOutfit(
+        wardrobeItems,
+        context,
+        input.exclude_ids ?? [],
+        recentlyWorn,
+        feedbackScores,
+        [...styleRules, ...ephemeralRules],
+      );
+
+      await sheets.logWorn(todayStr(), {
+        top: recommendation.wear.top,
+        bottom: recommendation.wear.bottom,
+        shoes: recommendation.wear.shoes,
+        outerwear: recommendation.wear.outerwear,
+      }).catch(() => {});
+
+      const describe = (id?: string) => {
+        if (!id) return '';
+        const item = items.find((i) => i.id === id);
+        return item
+          ? `${item.categorie} ${item.sousCategorie} ${item.couleur}${item.marque ? ` (${item.marque})` : ''} [${id}]`
+          : id;
+      };
+      return [
+        `Tenue générée (météo ${place.weather.temperature}°C à ${place.name}) :`,
+        `Haut : ${describe(recommendation.wear.top)}`,
+        `Bas : ${describe(recommendation.wear.bottom)}`,
+        `Chaussures : ${describe(recommendation.wear.shoes)}`,
+        recommendation.wear.outerwear ? `Veste : ${describe(recommendation.wear.outerwear)}` : '',
+        `Pourquoi : ${recommendation.why}`,
+      ].filter(Boolean).join('\n');
     }
     case 'get_planned_outfit': {
       const planned = await getPlannedOutfit(input.date);
