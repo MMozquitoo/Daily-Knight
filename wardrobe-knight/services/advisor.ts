@@ -90,6 +90,8 @@ ID | [layer] | catégorie | sous-catégorie | couleur | marque | matière | form
 Les "layers" sont : top, bottom, shoes, outerwear, accessories.
 La formalité va de 1 (très casual) à 5 (très formel). La polyvalence de 1 à 5.
 
+TENUE DU JOUR : si le contexte contient une section "TENUE DU JOUR", c'est la tenue que le bot a proposée ce matin. Quand l'utilisateur dit « ces chaussures », « cette chemise », « la tenue », « pourquoi ça », il parle de CES pièces-là — réponds directement sur elles (couleur, formalité, pourquoi le moteur les a choisies, alternatives). Tu ne reçois JAMAIS d'images dans la conversation : ne dis jamais « je ne vois pas d'image » — regarde la TENUE DU JOUR et l'inventaire à la place.
+
 SOURCE DE VÉRITÉ : l'INVENTAIRE ci-dessous est TOUJOURS à jour au moment présent et c'est la SEULE source fiable de ce que l'utilisateur possède. La garde-robe change en cours de conversation — l'utilisateur ajoute et retire des vêtements (souvent par photo, sans te le dire dans le chat). Ce que tu as pu dire plus tôt sur ce qu'il possède ou non peut donc être PÉRIMÉ. Avant d'affirmer qu'un vêtement manque ("tu n'as pas de X"), RELIS l'inventaire actuel et cherche par marque, catégorie ET sous-catégorie (ex : une Birkenstock apparaît en catégorie "Sandals", marque "Birkenstock"). Ne répète jamais une affirmation d'un tour précédent sans l'avoir re-vérifiée dans l'inventaire présent.
 
 Règles pour bien répondre :
@@ -504,6 +506,33 @@ export async function askAdvisor(
   const today = new Date();
   const dayNames = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
   contextLines.push('', `AUJOURD'HUI : ${dayNames[today.getDay()]} ${today.toISOString().slice(0, 10)}`);
+
+  // Today's proposed outfit, so "ces chaussures" means something. Without this the
+  // advisor once replied "je ne vois pas d'image" to a question about the day's
+  // sneakers — it had no idea what had been proposed that morning.
+  try {
+    const worn = await sheets.getWornRecently(1);
+    const todayEntry = worn.find((w) => w.date === todayStr());
+    if (todayEntry) {
+      const describe = (id?: string) => {
+        if (!id) return null;
+        const item = items.find((i) => i.id === id);
+        return item
+          ? `${item.categorie} ${item.sousCategorie} ${item.couleur}${item.marque ? ` (${item.marque})` : ''} [${id}]`
+          : id;
+      };
+      const outfitLines = [
+        ['Haut', describe(todayEntry.top)],
+        ['Bas', describe(todayEntry.bottom)],
+        ['Chaussures', describe(todayEntry.shoes)],
+        ['Veste', describe(todayEntry.outerwear)],
+      ].filter(([, v]) => v);
+      if (outfitLines.length) {
+        contextLines.push('', 'TENUE DU JOUR (proposée ce matin) :');
+        for (const [k, v] of outfitLines) contextLines.push(`${k} : ${v}`);
+      }
+    }
+  } catch { /* pas bloquant : le conseiller répond quand même */ }
 
   // Load persistent memories
   const [savedMemories, pendingFollowUps] = await Promise.all([

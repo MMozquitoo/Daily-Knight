@@ -358,10 +358,11 @@ app.event('message', async ({ event, say }) => {
 
   const audioFile = findAudioFile(files);
   if (audioFile) {
+    const reply = threadAwareSay(say, msg.thread_ts);
     try {
-      await handleVoiceMessage(audioFile, say, msg.user, msg.channel_type === 'im');
+      await handleVoiceMessage(audioFile, reply, msg.user, msg.channel_type === 'im');
     } catch (err) {
-      await say(`:x: Erreur avec la note vocale : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+      await reply(`:x: Erreur avec la note vocale : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
   }
 });
@@ -531,6 +532,17 @@ async function routeTextMessage(
   }
 }
 
+/**
+ * When the user writes inside a thread (e.g. a question under the morning
+ * outfit), the answer must land in that same thread — replying in the channel
+ * reads like the bot ignored them.
+ */
+function threadAwareSay(say: (msg: any) => Promise<any>, threadTs?: string): (msg: any) => Promise<any> {
+  if (!threadTs) return say;
+  return (msg: any) =>
+    say(typeof msg === 'string' ? { text: msg, thread_ts: threadTs } : { ...msg, thread_ts: threadTs });
+}
+
 app.message(async ({ message, say }) => {
   // A photo uploaded WITH a caption is delivered to both this handler and the
   // file_share event handler above. Let that one own it, or the caption gets
@@ -540,7 +552,8 @@ app.message(async ({ message, say }) => {
   if (message.type !== 'message' || !('text' in message) || !message.text) return;
 
   const userId = 'user' in message ? (message as any).user : undefined;
-  await routeTextMessage(message.text, say, userId, isDM(message));
+  const reply = threadAwareSay(say, (message as any).thread_ts);
+  await routeTextMessage(message.text, reply, userId, isDM(message));
 });
 
 app.action('regenerate_outfit', async ({ ack, respond, action }) => {

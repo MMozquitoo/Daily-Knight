@@ -7,7 +7,7 @@ import { categoryFromSheet } from '../types/wardrobe.js';
 import type { OutfitRecommendation, CarryItem } from '../types/outfit.js';
 import type { DayWeather } from '../types/weather.js';
 import type { StatsSummary, StatBucket } from '../services/stats.js';
-import { formatWeatherSlack } from '../services/weather.js';
+import { formatWeatherSlack, formatWeatherOneLine } from '../services/weather.js';
 
 const CARRY_LABELS: Record<CarryItem, string> = {
   umbrella: ':umbrella_with_rain_drops: Parapluie',
@@ -22,11 +22,15 @@ function itemDisplayName(item: ClothingItem): string {
 }
 
 /**
- * The daily outfit message.
+ * The daily outfit message — built mobile-first after Adrien's review:
+ * the try-on visual comes FIRST, the weather is one line (no Plage/Pluie/Vent),
+ * and everything fits without Slack's "View Full Message" fold. On mobile every
+ * button renders as a full-width row, so per-piece 👍/👎 buttons cost 8 rows —
+ * feedback lives in ONE compact select menu instead.
  *
  * `look` controls the imagery:
- *   - a URL      → ONE image: the user wearing the whole outfit (the goal state)
- *   - null       → no images at all (a look is being generated and follows separately)
+ *   - a URL      → ONE image on top: the user wearing the whole outfit
+ *   - null       → no image (a look is being generated and follows separately)
  *   - undefined  → legacy per-item product photos (only for callers not yet migrated)
  */
 export function outfitMessage(
@@ -41,60 +45,42 @@ export function outfitMessage(
     if (!id) return '';
     const item = itemMap.get(id);
     if (!item) return `${label} : _inconnu_`;
-    return `${label} : *${itemDisplayName(item)}* — ${item.couleur}${item.matiere ? ', ' + item.matiere : ''}`;
+    return `${label} : *${itemDisplayName(item)}* — ${item.couleur}`;
   }
 
-  // Each main piece gets its own line plus visible 👍/👎 buttons, so Mage Stylist
-  // learns which garments the user actually likes and weights them next time. The
-  // buttons used to hide in an overflow "…" menu and nobody found them.
-  const feedbackLayers: { id?: string; label: string }[] = [
-    { id: recommendation.wear.top, label: ':shirt: Haut' },
-    { id: recommendation.wear.bottom, label: ':jeans: Bas' },
-    { id: recommendation.wear.shoes, label: ':athletic_shoe: Chaussures' },
-    { id: recommendation.wear.outerwear, label: ':coat: Veste' },
+  const pieces: { id?: string; label: string; short: string }[] = [
+    { id: recommendation.wear.top, label: ':shirt: Haut', short: 'Haut' },
+    { id: recommendation.wear.bottom, label: ':jeans: Bas', short: 'Bas' },
+    { id: recommendation.wear.shoes, label: ':athletic_shoe: Chaussures', short: 'Chaussures' },
+    { id: recommendation.wear.outerwear, label: ':coat: Veste', short: 'Veste' },
   ];
-  const wearBlocks: object[] = [
-    { type: 'section', text: { type: 'mrkdwn', text: '*PORTER*' } },
-  ];
-  for (const { id, label } of feedbackLayers) {
-    if (!id) continue;
-    wearBlocks.push(
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: itemLine(id, label) },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '👍', emoji: true },
-            action_id: 'feedback_like',
-            value: id,
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '👎', emoji: true },
-            action_id: 'feedback_dislike',
-            value: id,
-          },
-        ],
-      },
-    );
-  }
-  const accLines = recommendation.wear.accessories
-    .map((id) => itemLine(id, ':ring: Acc'))
+
+  const porterLines = pieces
+    .map(({ id, label }) => itemLine(id, label))
     .filter(Boolean);
-  if (accLines.length) {
-    wearBlocks.push({ type: 'section', text: { type: 'mrkdwn', text: accLines.join('\n') } });
-  }
+  porterLines.push(...recommendation.wear.accessories.map((id) => itemLine(id, ':ring: Acc')).filter(Boolean));
 
-  const carryLines = recommendation.carry.length > 0
-    ? recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')
-    : '_Rien de plus_';
+  // One select = one row on mobile, instead of a wall of stacked buttons.
+  // Same values ("like:ID"/"dislike:ID") and action_id as the original overflow,
+  // so the existing handler keeps working for old and new messages alike.
+  const feedbackOptions = pieces
+    .filter((p): p is { id: string; label: string; short: string } => Boolean(p.id))
+    .flatMap(({ id, short }) => {
+      const item = itemMap.get(id);
+      const name = item ? itemDisplayName(item) : short;
+      // plain_text option labels are capped at 75 chars
+      const display = name.length > 60 ? `${name.slice(0, 57)}…` : name;
+      return [
+        { text: { type: 'plain_text', text: `👍 ${display}`, emoji: true }, value: `like:${id}` },
+        { text: { type: 'plain_text', text: `👎 ${display}`, emoji: true }, value: `dislike:${id}` },
+      ];
+    });
 
-  // Imagery: the goal is ONE picture of the user wearing the look — never a pile
-  // of product shots. Per-item photos only remain as the legacy fallback.
+  const carryLine = recommendation.carry.length > 0
+    ? `*Emporter :* ${recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')}`
+    : '';
+
+  // Imagery FIRST — Adrien opens the message to see the look, not to read.
   const imageBlocks: object[] = [];
   if (look) {
     imageBlocks.push({
@@ -127,22 +113,37 @@ export function outfitMessage(
       type: 'header',
       text: { type: 'plain_text', text: ':magic_wand: Ta tenue du jour', emoji: true },
     },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: formatWeatherSlack(weather) },
-    },
-    { type: 'divider' },
-    ...wearBlocks,
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: '*EMPORTER*\n' + carryLines },
-    },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: `*POURQUOI*\n_${recommendation.why}_` },
-    },
     ...imageBlocks,
-    { type: 'divider' },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: [formatWeatherOneLine(weather), ...porterLines].join('\n'),
+      },
+    },
+  ];
+
+  if (feedbackOptions.length) {
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'static_select',
+          action_id: 'item_feedback',
+          placeholder: { type: 'plain_text', text: '👍👎 Noter une pièce', emoji: true },
+          options: feedbackOptions,
+        },
+      ],
+    });
+  }
+
+  // Small print: why + what to carry, in a context block (renders compact)
+  const contextText = [`_${recommendation.why}_`, carryLine].filter(Boolean).join('\n');
+  blocks.push(
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: contextText }],
+    },
     {
       type: 'actions',
       elements: [
@@ -160,14 +161,9 @@ export function outfitMessage(
           action_id: 'more_formal',
           value: [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes].filter(Boolean).join(','),
         },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: ':calendar: Voir agenda', emoji: true },
-          action_id: 'view_agenda',
-        },
       ],
     },
-  ];
+  );
 
   return blocks;
 }

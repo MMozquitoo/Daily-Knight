@@ -160,20 +160,32 @@ export function getUserLocation(): { lat: number; lon: number } {
   };
 }
 
-/** Format weather for Slack display */
+const CONDITION_EMOJI: Record<WeatherCondition, string> = {
+  clear: ':sunny:',
+  cloudy: ':cloud:',
+  rain: ':rain_cloud:',
+  snow: ':snowflake:',
+  storm: ':zap:',
+  fog: ':fog:',
+};
+
+/** Format weather for Slack display (full version, for /meteo) */
 export function formatWeatherSlack(w: DayWeather): string {
-  const conditionEmoji: Record<WeatherCondition, string> = {
-    clear: ':sunny:',
-    cloudy: ':cloud:',
-    rain: ':rain_cloud:',
-    snow: ':snowflake:',
-    storm: ':zap:',
-    fog: ':fog:',
-  };
-  const emoji = conditionEmoji[w.condition] ?? ':cloud:';
+  const emoji = CONDITION_EMOJI[w.condition] ?? ':cloud:';
   return [
     `${emoji} *${w.temperature}°C* (ressenti ${w.feelsLike}°C)`,
     `Plage : ${w.tempMin}°C – ${w.tempMax}°C`,
     `Pluie : ${w.rainProbability}% · Vent : ${w.wind} km/h`,
   ].join('\n');
+}
+
+/**
+ * One-line weather for the daily outfit message. Adrien's ask: no Plage, no
+ * Pluie, no Vent — the outfit already accounts for them; he just wants the day's
+ * temperature at a glance.
+ */
+export function formatWeatherOneLine(w: DayWeather): string {
+  const emoji = CONDITION_EMOJI[w.condition] ?? ':cloud:';
+  const max = w.tempMax !== undefined ? ` · max ${w.tempMax}°C` : '';
+  return `${emoji} *${w.temperature}°C* (ressenti ${w.feelsLike}°C)${max}`;
 }
