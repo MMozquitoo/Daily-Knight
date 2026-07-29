@@ -107,11 +107,14 @@ export function categoryMatchesLayer(item: WardrobeItem, layer: LayerCategory): 
   return item.category === layer || item.layer === layer;
 }
 
-/** A day spent at home: nothing on the calendar sends the user anywhere. */
+/**
+ * A day spent at home: nothing on the calendar sends the user anywhere — a video
+ * call doesn't count. Checking dayType alone isn't enough, since a "casual" day can
+ * also mean an in-person lunch or the gym; every event has to be a remote work/formal
+ * call (or there simply are none) for the day to count as home.
+ */
 export function isHomeDay(context: DailyContext): boolean {
-  return context.agenda.meetingsCount === 0
-    && context.agenda.dayType !== 'office'
-    && context.agenda.dayType !== 'travel';
+  return context.agenda.events.every((e) => (e.tag === 'work' || e.tag === 'formal') && e.remote);
 }
 
 /** Whether a style rule is in force for today's context. */

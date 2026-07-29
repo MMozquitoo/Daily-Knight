@@ -43,6 +43,22 @@ function classifyEvent(title: string): EventTag {
   return 'work'; // default
 }
 
+const REMOTE_KEYWORDS = ['remote', 'télétravail', 'teletravail', 'wfh', 'visio', 'distanciel', 'zoom', 'teams', 'meet.google', 'google meet', 'home office'];
+const IN_PERSON_KEYWORDS = ['bureau', 'office', 'présentiel', 'presentiel', 'sur site', 'in-person', 'in person', 'on-site', 'onsite'];
+
+/**
+ * Whether an event keeps the user physically at home. A video call rarely fills in
+ * the location field, so no location defaults to remote — the alternative (defaulting
+ * to "office") is what made every day with a call read as "gone to the office", even
+ * a full day of video calls taken from the couch.
+ */
+function isRemoteEvent(title: string, location?: string): boolean {
+  const text = `${title} ${location ?? ''}`.toLowerCase();
+  if (IN_PERSON_KEYWORDS.some((w) => text.includes(w))) return false;
+  if (REMOTE_KEYWORDS.some((w) => text.includes(w))) return true;
+  return !location;
+}
+
 /** A Google Calendar event as the API returns it (only the fields we read) */
 interface RawEvent {
   id?: string | null;
@@ -72,6 +88,7 @@ function toAgendaEvent(e: RawEvent): AgendaEvent | null {
     endTime: e.end?.dateTime ?? e.end?.date ?? '',
     tag: classifyEvent(e.summary),
     location: e.location ?? undefined,
+    remote: isRemoteEvent(e.summary, e.location ?? undefined),
   };
 }
 
@@ -97,10 +114,12 @@ function deriveDayType(events: AgendaEvent[]): AgendaSummary['dayType'] {
   if (events.length === 0) return 'casual';
   const tags = events.map((e) => e.tag);
   if (tags.includes('travel')) return 'travel';
-  const hasFormal = tags.includes('formal') || tags.includes('work');
+  // A day full of video calls never sends the user to the office — only an
+  // in-person work/formal event should read as "office".
+  const hasInPersonWork = events.some((e) => (e.tag === 'formal' || e.tag === 'work') && !e.remote);
   const hasCasual = tags.includes('casual');
-  if (hasFormal && hasCasual) return 'mixed';
-  if (hasFormal) return 'office';
+  if (hasInPersonWork && hasCasual) return 'mixed';
+  if (hasInPersonWork) return 'office';
   return 'casual';
 }
 
@@ -237,6 +256,7 @@ export async function detectTrips(daysAhead: number = 14): Promise<TripInfo[]> {
         startTime,
         endTime,
         tag: 'travel',
+        remote: false,
       });
     }
   }
@@ -270,6 +290,7 @@ export async function detectTrips(daysAhead: number = 14): Promise<TripInfo[]> {
         startTime: e.start?.dateTime || e.start?.date || '',
         endTime: e.end?.dateTime || e.end?.date || '',
         tag: classifyEvent(e.summary ?? ''),
+        remote: isRemoteEvent(e.summary ?? '', e.location ?? undefined),
       }));
 
     trips.push({ destination, startDate, endDate, days, events: tripEvents });

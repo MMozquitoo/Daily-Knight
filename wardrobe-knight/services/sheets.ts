@@ -491,10 +491,26 @@ async function ensureRulesSheet(): Promise<void> {
   }
 }
 
-/** Persist a spoken style rule ("pas de chemise à la maison"). */
-export async function logStyleRule(rule: Omit<StyleRule, 'date'>): Promise<void> {
+/**
+ * Persist a spoken style rule ("pas de chemise à la maison").
+ *
+ * Skips the write if an identical (context, target, action) rule is already saved —
+ * the advisor has no memory of which rules it already knows, so without this check
+ * "n'oublie pas : pas de chemise à la maison" said twice creates two rows, and a
+ * sheet full of near-duplicates gets harder to audit or clean up by hand.
+ */
+export async function logStyleRule(rule: Omit<StyleRule, 'date'>): Promise<boolean> {
   await ensureRulesSheet();
   return serialise(async () => {
+    const existing = await getStyleRules();
+    const isDuplicate = existing.some(
+      (r) =>
+        r.context === rule.context &&
+        r.action === rule.action &&
+        r.target.toLowerCase() === rule.target.trim().toLowerCase(),
+    );
+    if (isDuplicate) return false;
+
     const sheets = getSheets();
     await sheets.spreadsheets.values.append({
       spreadsheetId: sheetId(),
@@ -504,6 +520,7 @@ export async function logStyleRule(rule: Omit<StyleRule, 'date'>): Promise<void>
         values: [[todayStr(), rule.context, rule.target, rule.action, rule.note ?? '']],
       },
     });
+    return true;
   });
 }
 

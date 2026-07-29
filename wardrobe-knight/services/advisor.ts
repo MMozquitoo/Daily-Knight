@@ -90,7 +90,9 @@ ID | [layer] | catégorie | sous-catégorie | couleur | marque | matière | form
 Les "layers" sont : top, bottom, shoes, outerwear, accessories.
 La formalité va de 1 (très casual) à 5 (très formel). La polyvalence de 1 à 5.
 
-TENUE DU JOUR : si le contexte contient une section "TENUE DU JOUR", c'est la tenue que le bot a proposée ce matin. Quand l'utilisateur dit « ces chaussures », « cette chemise », « la tenue », « pourquoi ça », il parle de CES pièces-là — réponds directement sur elles (couleur, formalité, pourquoi le moteur les a choisies, alternatives). Tu ne reçois JAMAIS d'images dans la conversation : ne dis jamais « je ne vois pas d'image » — regarde la TENUE DU JOUR et l'inventaire à la place.
+TENUE DU JOUR : si le contexte contient une section "TENUE DU JOUR", c'est la tenue que le bot a proposée ce matin. Quand l'utilisateur dit « ces chaussures », « cette chemise », « la tenue », « pourquoi ça », il parle de CES pièces-là — réponds directement sur elles (couleur, formalité, pourquoi le moteur les a choisies, alternatives).
+
+Tu ne reçois JAMAIS d'images dans la conversation — aucun outil ne t'en envoie, même si l'utilisateur a joint une photo côté Slack. Si une pièce mentionnée n'est PAS dans la TENUE DU JOUR, ne dis jamais « je ne vois pas d'image » ou une variante : cherche-la plutôt dans l'INVENTAIRE par catégorie, sous-catégorie, couleur ou marque, et réponds sur la pièce trouvée. Si aucune pièce de l'inventaire ne correspond à la description, dis-le explicitement ("je ne trouve pas cette pièce dans ton inventaire") et demande l'ID ou une description plus précise — sans jamais mentionner d'image.
 
 SOURCE DE VÉRITÉ : l'INVENTAIRE ci-dessous est TOUJOURS à jour au moment présent et c'est la SEULE source fiable de ce que l'utilisateur possède. La garde-robe change en cours de conversation — l'utilisateur ajoute et retire des vêtements (souvent par photo, sans te le dire dans le chat). Ce que tu as pu dire plus tôt sur ce qu'il possède ou non peut donc être PÉRIMÉ. Avant d'affirmer qu'un vêtement manque ("tu n'as pas de X"), RELIS l'inventaire actuel et cherche par marque, catégorie ET sous-catégorie (ex : une Birkenstock apparaît en catégorie "Sandals", marque "Birkenstock"). Ne répète jamais une affirmation d'un tour précédent sans l'avoir re-vérifiée dans l'inventaire présent.
 
@@ -361,13 +363,15 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
         .join('\n');
     }
     case 'save_style_rule': {
-      await sheets.logStyleRule({
+      const saved = await sheets.logStyleRule({
         context: input.context,
         target: input.target,
         action: input.action,
         note: input.note,
       });
-      return `Règle sauvegardée : [${input.context}] ${input.action} ${input.target}. Le moteur l'appliquera à chaque tenue.`;
+      return saved
+        ? `Règle sauvegardée : [${input.context}] ${input.action} ${input.target}. Le moteur l'appliquera à chaque tenue.`
+        : `Cette règle était déjà connue : [${input.context}] ${input.action} ${input.target}.`;
     }
     case 'suggest_outfit': {
       const [agenda, items, wornHistory, feedbackScores, styleRules] = await Promise.all([

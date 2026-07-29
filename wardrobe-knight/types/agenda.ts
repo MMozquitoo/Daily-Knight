@@ -17,6 +17,8 @@ export interface AgendaEvent {
   tag: EventTag;
   /** Google Calendar's location field — where the day actually happens */
   location?: string;
+  /** Keeps the user physically at home — a video call, not a trip to the office */
+  remote: boolean;
 }
 
 /** Summary of the day's agenda — input to the decision engine */

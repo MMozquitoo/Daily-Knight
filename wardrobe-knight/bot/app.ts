@@ -190,6 +190,7 @@ async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
 }
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const IMAGE_QUESTION_PATTERN = /\?|comment|combien|quel(le)?s?\b|est-ce|qu'en pens|penses-tu|ça (va|matche)|va (avec|bien)/i;
 
 // Dedup: track processed event timestamps to prevent duplicate processing
 const processedEvents = new Set<string>();
@@ -349,7 +350,17 @@ app.event('message', async ({ event, say }) => {
   if (imageFile) {
     try {
       const userText = msg.text || undefined;
-      await handleImageMessage(imageFile, userText, say, msg.user);
+      // A caption that asks a question ("ça va avec quoi ?") isn't a request to add
+      // the item — the vision parser would silently try anyway and produce a
+      // confusing or wrong answer. Say plainly what a photo can and can't do yet.
+      if (userText && IMAGE_QUESTION_PATTERN.test(userText) && !isAddItemIntent(userText)) {
+        await say(
+          'Je ne sais pas encore répondre à une question sur une photo — je peux seulement m\'en servir pour ajouter la pièce à ta garde-robe. ' +
+          'Écris "ajoute" si tu veux que je l\'enregistre, ou décris-moi la pièce en texte pour que je réponde à ta question.',
+        );
+      } else {
+        await handleImageMessage(imageFile, userText, say, msg.user);
+      }
     } catch (err) {
       await say(`:x: Erreur lors de l'analyse de la photo : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
