@@ -110,6 +110,7 @@ export function toWardrobeItem(item: ClothingItem): WardrobeItem {
     templateId: `${category}_${type}_${item.sousCategorie.toLowerCase()}`,
     color: mapColor(item.couleur),
     palette: item.palette,
+    cut: item.coupe.toLowerCase().trim(),
     formality,
     contexts: deriveContexts(item.niveau, item.formalite),
     weatherSuitability: {

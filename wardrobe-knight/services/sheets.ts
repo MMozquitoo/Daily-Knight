@@ -23,7 +23,7 @@ const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | O
 const FEEDBACK_SHEET = 'Feedback';
 const FEEDBACK_RANGE = `${FEEDBACK_SHEET}!A:C`; // Date | ItemID | Vote (+1 / -1)
 const RULES_SHEET = 'Règles';
-const RULES_RANGE = `${RULES_SHEET}!A:E`; // Date | Contexte | Cible | Action | Note
+const RULES_RANGE = `${RULES_SHEET}!A:G`; // Date | Contexte | Cible | Action | Note | Couleur | Coupe
 
 function getAuth() {
   return new google.auth.GoogleAuth({
@@ -470,6 +470,7 @@ export async function getFeedbackScores(): Promise<Map<string, number>> {
 // ---------------------------------------------------------------------------
 
 let rulesSheetReady = false;
+const RULES_HEADER = ['Date', 'Contexte', 'Cible', 'Action', 'Note', 'Couleur', 'Coupe'];
 
 async function ensureRulesSheet(): Promise<void> {
   if (rulesSheetReady) return;
@@ -479,57 +480,86 @@ async function ensureRulesSheet(): Promise<void> {
       spreadsheetId: sheetId(),
       requestBody: { requests: [{ addSheet: { properties: { title: RULES_SHEET } } }] },
     });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: sheetId(),
-      range: `${RULES_SHEET}!A1:E1`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [['Date', 'Contexte', 'Cible', 'Action', 'Note']] },
-    });
-    rulesSheetReady = true;
   } catch (err: any) {
-    if (err?.message?.includes('already exists')) {
-      rulesSheetReady = true;
-      return;
-    }
-    throw err;
+    if (!err?.message?.includes('already exists')) throw err;
+    // Sheet pre-dates the Couleur/Coupe columns — the header below still needs
+    // widening even though creation itself is a no-op past this point.
   }
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId(),
+    range: `${RULES_SHEET}!A1:G1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [RULES_HEADER] },
+  });
+  rulesSheetReady = true;
+}
+
+const RULE_CONTEXTS = new Set(['maison', 'bureau', 'voyage', 'toujours']);
+const RULE_ACTIONS = new Set(['eviter', 'preferer']);
+
+/** Parses one data row into a StyleRule, or null if context/action/target don't check out. */
+function parseRuleRow(row: string[]): StyleRule | null {
+  const context = (row[1] ?? '').trim().toLowerCase();
+  const target = (row[2] ?? '').trim();
+  const action = (row[3] ?? '').trim().toLowerCase();
+  if (!target || !RULE_CONTEXTS.has(context) || !RULE_ACTIONS.has(action)) return null;
+  return {
+    date: row[0] ?? '',
+    context: context as StyleRule['context'],
+    target,
+    action: action as StyleRule['action'],
+    note: row[4] || undefined,
+    color: (row[5] || undefined) as StyleRule['color'],
+    cut: (row[6] ?? '').trim().toLowerCase() || undefined,
+  };
 }
 
 /**
  * Persist a spoken style rule ("pas de chemise à la maison").
  *
- * Skips the write if an identical (context, target, action) rule is already saved —
- * the advisor has no memory of which rules it already knows, so without this check
- * "n'oublie pas : pas de chemise à la maison" said twice creates two rows, and a
- * sheet full of near-duplicates gets harder to audit or clean up by hand.
+ * Skips the write if an identical (context, target, action, color, cut) rule is
+ * already saved — the advisor has no memory of which rules it already knows, so
+ * without this check "n'oublie pas : pas de chemise à la maison" said twice
+ * creates two rows, and a sheet full of near-duplicates gets harder to audit or
+ * clean up by hand.
+ *
+ * Writes to an explicit A{row}:G{row} range (like the Armoire sheet's append/
+ * update) rather than the native values.append endpoint — append() auto-detects
+ * the table's column span from existing data, and a sparsely-populated Couleur/
+ * Coupe tail was observed shifting whole rows into the wrong columns.
  */
 export async function logStyleRule(rule: Omit<StyleRule, 'date'>): Promise<boolean> {
   await ensureRulesSheet();
   return serialise(async () => {
-    const existing = await getStyleRules();
+    const sheets = getSheets();
+    const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId(), range: RULES_RANGE });
+    const rows = res.data.values ?? [];
+    const existing = rows.slice(1).map(parseRuleRow).filter((r): r is StyleRule => r !== null);
     const isDuplicate = existing.some(
       (r) =>
         r.context === rule.context &&
         r.action === rule.action &&
-        r.target.toLowerCase() === rule.target.trim().toLowerCase(),
+        r.target.toLowerCase() === rule.target.trim().toLowerCase() &&
+        (r.color ?? '') === (rule.color ?? '') &&
+        (r.cut ?? '').toLowerCase() === (rule.cut ?? '').toLowerCase(),
     );
     if (isDuplicate) return false;
 
-    const sheets = getSheets();
-    await sheets.spreadsheets.values.append({
+    const nextRow = rows.length + 1;
+    await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId(),
-      range: RULES_RANGE,
+      range: `${RULES_SHEET}!A${nextRow}:G${nextRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[todayStr(), rule.context, rule.target, rule.action, rule.note ?? '']],
+        values: [[
+          todayStr(), rule.context, rule.target, rule.action, rule.note ?? '',
+          rule.color ?? '', rule.cut ?? '',
+        ]],
       },
     });
     return true;
   });
 }
-
-const RULE_CONTEXTS = new Set(['maison', 'bureau', 'voyage', 'toujours']);
-const RULE_ACTIONS = new Set(['eviter', 'preferer']);
 
 /** All saved style rules. Rows with an unknown context/action are skipped, not guessed. */
 export async function getStyleRules(): Promise<StyleRule[]> {
@@ -542,17 +572,8 @@ export async function getStyleRules(): Promise<StyleRule[]> {
   const rows = res.data.values ?? [];
   const rules: StyleRule[] = [];
   for (const row of rows.slice(1)) {
-    const context = (row[1] ?? '').trim().toLowerCase();
-    const target = (row[2] ?? '').trim();
-    const action = (row[3] ?? '').trim().toLowerCase();
-    if (!target || !RULE_CONTEXTS.has(context) || !RULE_ACTIONS.has(action)) continue;
-    rules.push({
-      date: row[0] ?? '',
-      context: context as StyleRule['context'],
-      target,
-      action: action as StyleRule['action'],
-      note: row[4] || undefined,
-    });
+    const parsed = parseRuleRow(row);
+    if (parsed) rules.push(parsed);
   }
   return rules;
 }

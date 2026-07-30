@@ -134,9 +134,16 @@ export function ruleApplies(rule: StyleRule, context: DailyContext): boolean {
   }
 }
 
-/** Whether a rule targets this garment — by engine type ("shirt") or exact ID ("CA-03"). */
+/**
+ * Whether a rule targets this garment — by engine type ("shirt"), exact ID ("CA-03"),
+ * or "*" (any type) narrowed by color/cut. Color and cut, when set, are additional
+ * filters on top of the type/ID match, not alternatives to it.
+ */
 export function ruleTargets(rule: StyleRule, item: WardrobeItem): boolean {
   const target = rule.target.trim().toLowerCase();
   if (!target) return false;
-  return item.type === target || item.id.toLowerCase() === target;
+  if (target !== '*' && item.type !== target && item.id.toLowerCase() !== target) return false;
+  if (rule.color && item.color !== rule.color) return false;
+  if (rule.cut && !item.cut.includes(rule.cut.trim().toLowerCase())) return false;
+  return true;
 }

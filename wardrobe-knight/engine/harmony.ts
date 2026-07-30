@@ -19,6 +19,7 @@
  *   4. Navy and black together read as a mistake, not a choice.
  *   5. Warm and cool palettes don't get mixed half and half.
  *   6. Some contrast between top and bottom — head-to-toe one shade is a uniform.
+ *   7. All-black is heavy, not sharp — reserve black for one piece, never the whole fit.
  */
 
 import type { FormalityLevel, PaletteColor, PaletteTemp, WardrobeItem } from '../types/wardrobe.js';
@@ -144,6 +145,17 @@ export function evaluateHarmony(outfit: RawOutfit): HarmonyResult {
   if (outfit.top.color === outfit.bottom.color && outfit.top.color !== 'white') {
     score -= 6;
     notes.push('haut et bas de la même couleur');
+  }
+
+  // 7. All-black reads as heavy, not sharp — reserve it for one easy piece
+  // (jean, maille, veste légère), never the whole silhouette.
+  if (items.length >= 2 && items.every((item) => item.color === 'black')) {
+    conflicts.push({
+      code: 'color_mismatch',
+      message: 'Noir de la tête aux pieds : à réserver à une seule pièce.',
+      itemIds: items.map((item) => item.id),
+    });
+    score -= 16;
   }
 
   // A tight palette is a good sign; five colours is a jumble

@@ -129,7 +129,9 @@ OUTILS TENUE & RÈGLES DE STYLE — c'est comme ça que tu APPRENDS :
   la SEULE chose que le moteur du matin lit : un save_memory ne change JAMAIS les tenues
   proposées. Exemple exact : l'utilisateur dit « pourquoi une chemise, je suis à la maison,
   je veux être informel » → save_style_rule(context=maison, target=shirt, action=eviter)
-  PUIS suggest_outfit(max_formality=casual, avoid_types=["shirt"]).
+  PUIS suggest_outfit(max_formality=casual, avoid_types=["shirt"]). target peut aussi être "*"
+  combiné à color et/ou cut pour cibler par couleur/coupe plutôt que par type (ex : « jamais
+  de jaune » → target="*", color=yellow ; « jamais de jean skinny » → target=jeans, cut=skinny).
 
 OUTILS MÉMOIRE — Tu as une mémoire persistante entre les conversations :
 - save_memory : Sauvegarde une info importante. Types :
@@ -270,12 +272,21 @@ const TOOLS: Anthropic.Tool[] = [
         },
         target: {
           type: 'string',
-          description: "Type de vêtement du moteur : shirt, tshirt, sweater, hoodie, pants, jeans, shorts, sneakers, boots, loafers, sandals, jacket, coat, blazer, vest — OU un ID précis (ex : CA-03). « chemise » → shirt.",
+          description: "Type de vêtement du moteur : shirt, tshirt, sweater, hoodie, pants, jeans, shorts, sneakers, boots, loafers, sandals, jacket, coat, blazer, vest — OU un ID précis (ex : CA-03) — OU \"*\" pour cibler uniquement par couleur/coupe (ex : « jamais de jaune » → target=\"*\", color=yellow). « chemise » → shirt.",
         },
         action: {
           type: 'string',
           enum: ['eviter', 'preferer'],
           description: 'eviter = ne plus proposer dans ce contexte ; preferer = favoriser.',
+        },
+        color: {
+          type: 'string',
+          enum: ['white', 'black', 'navy', 'gray', 'beige', 'brown', 'olive', 'red', 'blue', 'green', 'yellow', 'pink', 'purple', 'orange'],
+          description: 'Optionnel : restreint la règle à cette couleur (en plus du target, ou seul avec target="*").',
+        },
+        cut: {
+          type: 'string',
+          description: 'Optionnel : restreint la règle à une coupe (ex : "skinny") — comparée à la sous-catégorie du vêtement.',
         },
         note: {
           type: 'string',
@@ -370,6 +381,8 @@ async function executeTool(name: string, input: Record<string, any>, userId: str
         context: input.context,
         target: input.target,
         action: input.action,
+        color: input.color,
+        cut: input.cut,
         note: input.note,
       });
       return saved

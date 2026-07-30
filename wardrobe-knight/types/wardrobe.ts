@@ -112,6 +112,8 @@ export interface WardrobeItem {
   color: PaletteColor;
   /** Sheet column G — warm/cool/neutral, used for palette coherence */
   palette: PaletteTemp;
+  /** Sheet column I (Coupe), lowercased — e.g. "straight", "skinny". Used for cut-based style rules. */
+  cut: string;
   /** Sheet column O — a worn-out garment is deprioritised, not excluded */
   condition: ItemCondition;
   formality: FormalityLevel;
