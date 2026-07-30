@@ -112,20 +112,45 @@ Additional visual analysis rules:
 - Assess formality level from the item's style
 - If the user provided additional text, use it to fill or override fields (e.g. brand, model)`;
 
+/** Extra fields returned only when the photo was taken away from Paris (see origin/style context). */
+export interface TravelAnalysis {
+  usableParis?: 'oui' | 'non' | 'à vérifier';
+  usableParisRaison?: string;
+}
+
+function buildTravelPrompt(origin: string, styleProfile?: string): string {
+  return `\n\nCette pièce a été photographiée à ${origin}, pas à Paris où Adrien vit et porte le reste de sa garde-robe. ` +
+    `Évalue si elle est utilisable dans sa garde-robe parisienne, en tenant compte du climat tempéré de Paris (4 saisons, ` +
+    `rarement les extrêmes de chaleur ou de froid secs) et, si fourni ci-dessous, de son style personnel.\n\n` +
+    (styleProfile
+      ? `Profil de style d'Adrien :\n"""\n${styleProfile}\n"""\n`
+      : `(Profil de style d'Adrien pas encore renseigné — juge uniquement sur le climat et la polyvalence générale de la pièce.)\n`) +
+    `\nAjoute deux clés au JSON :\n` +
+    `"usableParis": "oui" (s'intègre au climat et au style d'Adrien à Paris) | "non" (trop spécifique au climat/style local, ` +
+    `ex. doudoune trop épaisse, pièce hors style) | "à vérifier" (incertain),\n` +
+    `"usableParisRaison": une phrase courte en français justifiant le choix.`;
+}
+
 export async function parseAddItemFromImage(
   imageBase64: string,
   mimeType: string,
   userText?: string,
-): Promise<ParsedItem> {
+  travelContext?: { origin: string; styleProfile?: string },
+): Promise<ParsedItem & TravelAnalysis> {
   const anthropic = getClient();
 
-  const textContent = userText
+  const travelPrompt =
+    travelContext && travelContext.origin !== 'Paris'
+      ? buildTravelPrompt(travelContext.origin, travelContext.styleProfile)
+      : '';
+
+  const textContent = (userText
     ? `${IMAGE_PROMPT}\n\nUser message: "${userText}"`
-    : IMAGE_PROMPT;
+    : IMAGE_PROMPT) + travelPrompt;
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 500,
+    max_tokens: travelPrompt ? 650 : 500,
     messages: [
       {
         role: 'user',
@@ -163,6 +188,8 @@ export async function parseAddItemFromImage(
       impact: parsed.impact != null ? Number(parsed.impact) : undefined,
       polyvalence: parsed.polyvalence != null ? Number(parsed.polyvalence) : undefined,
       etat: parsed.etat ?? undefined,
+      usableParis: parsed.usableParis ?? undefined,
+      usableParisRaison: parsed.usableParisRaison ?? undefined,
     };
   } catch {
     throw new Error('Je n\'ai pas pu analyser la photo. Essaie avec une meilleure image ou ajoute une description.');

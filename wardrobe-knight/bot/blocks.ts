@@ -206,7 +206,13 @@ export function statsMessage(stats: StatsSummary): object[] {
   ];
 }
 
-export function savedItemMessage(item: ClothingItem): object[] {
+const USABLE_PARIS_EMOJI: Record<string, string> = {
+  oui: ':white_check_mark:',
+  non: ':x:',
+  'à vérifier': ':grey_question:',
+};
+
+export function savedItemMessage(item: ClothingItem, usableParisRaison?: string): object[] {
   const fields = [
     `*ID :* ${item.id}`,
     `*Catégorie :* ${item.categorie || '_–_'}`,
@@ -225,6 +231,14 @@ export function savedItemMessage(item: ClothingItem): object[] {
     `*État :* ${item.etat || 'neuf'}`,
   ];
 
+  if (item.origine && item.origine !== 'Paris') {
+    fields.push(`*Origine :* ${item.origine}`);
+    if (item.usableParis) {
+      const emoji = USABLE_PARIS_EMOJI[item.usableParis] ?? '';
+      fields.push(`*Utilisable à Paris :* ${emoji} ${item.usableParis}`);
+    }
+  }
+
   const blocks: object[] = [];
 
   if (item.imageUrl) {
@@ -235,14 +249,22 @@ export function savedItemMessage(item: ClothingItem): object[] {
     });
   }
 
-  blocks.push(
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `:white_check_mark: *Enregistré dans ton armoire :*\n\n` + fields.join('\n'),
-      },
+  blocks.push({
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
+      text: `:white_check_mark: *Enregistré dans ton armoire :*\n\n` + fields.join('\n'),
     },
+  });
+
+  if (usableParisRaison) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `:speech_balloon: _${usableParisRaison}_` }],
+    });
+  }
+
+  blocks.push(
     {
       type: 'actions',
       elements: [

@@ -20,6 +20,8 @@ import { askAdvisor, clearHistory } from '../services/advisor.js';
 import { generateTryOn, generateFullLook } from '../services/tryon.js';
 import { transcribeAudio } from '../services/transcribe.js';
 import { computeStats } from '../services/stats.js';
+import { getCurrentOrigin } from '../services/env.js';
+import { getStyleProfileText } from '../services/styleProfile.js';
 import sharp from 'sharp';
 import { outfitMessage, savedItemMessage, editItemModal, wardrobeList, statsMessage, tryonMessage } from './blocks.js';
 import { afterAck } from './defer.js';
@@ -243,7 +245,10 @@ async function handleImageMessage(
     .jpeg({ quality: 85 })
     .toBuffer();
   const base64 = resized.toString('base64');
-  const parsed = await parseAddItemFromImage(base64, 'image/jpeg', userText || undefined);
+  const origin = getCurrentOrigin();
+  // Only worth the extra Docs API round-trip and prompt tokens while travelling.
+  const styleProfile = origin !== 'Paris' ? await getStyleProfileText().catch(() => undefined) : undefined;
+  const parsed = await parseAddItemFromImage(base64, 'image/jpeg', userText || undefined, { origin, styleProfile });
   if (!parsed.categorie) {
     await say(':x: Je n\'ai pas pu identifier le vêtement sur la photo. Essaie avec une meilleure image ou ajoute une description.');
     return;
@@ -265,6 +270,8 @@ async function handleImageMessage(
     polyvalence: parsed.polyvalence ?? 3,
     etat: parsed.etat ?? 'neuf',
     imageUrl,
+    origine: origin,
+    usableParis: origin !== 'Paris' ? (parsed.usableParis ?? 'à vérifier') : undefined,
   };
   // ID assigned atomically so two quick photos can't collide on it
   const id = await sheets.createItem(fields);
@@ -273,7 +280,7 @@ async function handleImageMessage(
   // "tu n'as pas de X" from an earlier turn can't anchor the next answer against
   // the item they just added.
   if (userId) clearHistory(userId);
-  await say({ blocks: savedItemMessage(item) as any });
+  await say({ blocks: savedItemMessage(item, origin !== 'Paris' ? parsed.usableParisRaison : undefined) as any });
 
   // Auto-generate try-on in the background — but ONLY off Vercel. On serverless the
   // instance freezes the moment the response is flushed, so this promise never
@@ -419,6 +426,7 @@ async function routeTextMessage(
         impact: parsed.impact ?? 3,
         polyvalence: parsed.polyvalence ?? 3,
         etat: parsed.etat ?? 'neuf',
+        origine: getCurrentOrigin(),
       };
       const id = await sheets.createItem(fields);
       const item = { ...fields, id } as ClothingItem;

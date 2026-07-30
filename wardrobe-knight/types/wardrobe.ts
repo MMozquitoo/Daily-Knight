@@ -27,7 +27,12 @@ export interface ClothingItem {
   imageUrl?: string;       // P: Slack permalink (optional)
   tryonUrl?: string;       // Q: Virtual try-on image URL (optional)
   productUrl?: string;     // R: AI-generated product image URL (optional)
+  origine?: string;        // S: Paris | Pologne | etc. — where the piece was acquired/seen (optional)
+  usableParis?: UsableParis; // T: whether the piece fits Adrien's Paris wardrobe (optional)
 }
+
+/** Column T — can a piece bought/seen while travelling be worn back in Paris? */
+export type UsableParis = 'oui' | 'non' | 'à vérifier';
 
 /** Palette temperature (column G) */
 export type PaletteTemp = 'froid' | 'neutre' | 'chaud';

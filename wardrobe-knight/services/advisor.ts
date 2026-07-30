@@ -13,6 +13,7 @@ import { toWardrobeItems } from '../types/adapter.js';
 import { fetchTodayAgenda } from './calendar.js';
 import { resolveDayPlace } from './destination.js';
 import { todayStr } from './dates.js';
+import { getStyleProfileText } from './styleProfile.js';
 
 let client: Anthropic | null = null;
 
@@ -102,6 +103,8 @@ Règles pour bien répondre :
 - "Qu'est-ce qui est en double" → même catégorie + couleur + formalité proches (±1). Signale par ID.
 - "Qu'est-ce que je peux jeter" → priorise état "usé", faible polyvalence, puis doublons.
 - "Quel accessoire va avec X" → harmonie de couleur et cohérence de formalité (±1 niveau).
+
+PROFIL DE STYLE : si le contexte contient une section "PROFIL DE STYLE D'ADRIEN", elle prime sur toute connaissance générique de la mode — c'est lui qui l'a écrite. Utilise-la pour juger si une pièce lui va, pour choisir entre plusieurs pièces également valables niveau météo/formalité, et pour cadrer suggest_outfit (avoid_types, max_formality) quand ses règles vestimentaires s'appliquent. Si cette section est absente, le profil n'est pas encore rempli — raisonne alors sur le bon sens général, sans l'inventer.
 
 IMAGES : NE JAMAIS inclure d'URLs d'images, de liens markdown ![](url) ou de liens bruts dans ta réponse. Les images des vêtements sont affichées automatiquement par le système. N'essaie pas de les montrer toi-même.
 
@@ -539,10 +542,15 @@ export async function askAdvisor(
   } catch { /* pas bloquant : le conseiller répond quand même */ }
 
   // Load persistent memories
-  const [savedMemories, pendingFollowUps] = await Promise.all([
+  const [savedMemories, pendingFollowUps, styleProfile] = await Promise.all([
     memory.getMemories(userId).catch(() => []),
     memory.getPendingFollowUps(userId).catch(() => []),
+    getStyleProfileText().catch(() => undefined),
   ]);
+
+  if (styleProfile) {
+    contextLines.push('', 'PROFIL DE STYLE D\'ADRIEN (rempli par lui, fait autorité sur ses goûts) :', styleProfile);
+  }
 
   if (savedMemories.length > 0) {
     contextLines.push('', `SOUVENIRS (${savedMemories.length}) :`);

@@ -35,3 +35,20 @@ export function getGoogleServiceAccount(): GoogleServiceAccount {
 
   return credentials;
 }
+
+/**
+ * Where Adrien currently is, for tagging newly-added pieces.
+ *
+ * There's no calendar signal for a personal trip (only work events carry a
+ * location — see services/destination.ts), so this is a manual switch: set
+ * CURRENT_TRIP_ORIGIN while Adrien is away, unset it (or set it to "Paris")
+ * once he's back.
+ */
+export function getCurrentOrigin(): string {
+  return process.env.CURRENT_TRIP_ORIGIN?.trim() || 'Paris';
+}
+
+/** Google Doc ID for Adrien's style profile (Phase 3 — see docs/adrien-style-profile-prompt.md). */
+export function getStyleDocId(): string | undefined {
+  return process.env.GOOGLE_STYLE_DOC_ID?.trim() || undefined;
+}

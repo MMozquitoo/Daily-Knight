@@ -17,7 +17,7 @@ import { getGoogleServiceAccount, getRequiredEnv } from './env.js';
 import { daysAgo, todayStr } from './dates.js';
 
 const SHEET_NAME = 'Armoire';
-const RANGE = `${SHEET_NAME}!A:R`; // 18 columns A–R (P = image URL, Q = try-on URL, R = product image URL)
+const RANGE = `${SHEET_NAME}!A:T`; // 20 columns A–T (P = image URL, Q = try-on URL, R = product image URL, S = origine, T = utilisable à Paris)
 const HISTORY_SHEET = 'Historique';
 const HISTORY_RANGE = `${HISTORY_SHEET}!A:E`; // Date | Top | Bottom | Shoes | Outerwear
 const FEEDBACK_SHEET = 'Feedback';
@@ -61,6 +61,8 @@ function rowToItem(row: string[]): ClothingItem {
     imageUrl: row[15] || undefined,
     tryonUrl: row[16] || undefined,
     productUrl: row[17] || undefined,
+    origine: row[18] || undefined,
+    usableParis: (row[19] || undefined) as ClothingItem['usableParis'],
   };
 }
 
@@ -85,6 +87,8 @@ function itemToRow(item: ClothingItem): string[] {
     item.imageUrl ?? '',
     item.tryonUrl ?? '',
     item.productUrl ?? '',
+    item.origine ?? '',
+    item.usableParis ?? '',
   ];
 }
 
@@ -169,7 +173,7 @@ export async function createItem(item: Omit<ClothingItem, 'id'>): Promise<string
     const nextRow = rows.length + 1;
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId(),
-      range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
+      range: `${SHEET_NAME}!A${nextRow}:T${nextRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [itemToRow({ ...item, id } as ClothingItem)] },
     });
@@ -188,7 +192,7 @@ export async function append(item: ClothingItem): Promise<void> {
     const nextRow = (res.data.values?.length ?? 1) + 1;
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId(),
-      range: `${SHEET_NAME}!A${nextRow}:R${nextRow}`,
+      range: `${SHEET_NAME}!A${nextRow}:T${nextRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [itemToRow(item)],
@@ -216,7 +220,7 @@ export async function update(id: string, fields: Partial<ClothingItem>): Promise
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId(),
-      range: `${SHEET_NAME}!A${rowNumber}:R${rowNumber}`,
+      range: `${SHEET_NAME}!A${rowNumber}:T${rowNumber}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [itemToRow(updated)],
