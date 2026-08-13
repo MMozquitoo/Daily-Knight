@@ -150,6 +150,7 @@ export const CATEGORY_PREFIXES: Record<string, string> = {
   tie: 'CR',
   bag: 'MA',
   watch: 'RE',
+  glasses: 'LU',
 };
 
 /** Map sheet Catégorie to engine LayerCategory */

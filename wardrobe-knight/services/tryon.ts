@@ -98,10 +98,16 @@ export function isTryonFriendlyTop(item: ClothingItem): boolean {
 
 /**
  * ONE image of the user wearing the whole outfit — the deliverable of the daily
- * message. Nano Banana (Gemini image editing) first: it composes every layer in a
- * single pass and handles the open shirts and overshirts that IDM-VTON mangles,
- * which is why shirt days used to ship with no image at all. Falls back to the
- * two-pass IDM-VTON chain when it fails, and to null when nothing works.
+ * message. IDM-VTON first: it warps the garment onto the base photo instead of
+ * redrawing the scene, so it never drifts off Adrien's actual face the way Nano
+ * Banana occasionally does — including on full nano-banana shoe days, which used
+ * to be the biggest source of "that's not me" complaints. Only usable when the top
+ * is try-on friendly (see isTryonFriendlyTop); shoes can't go through IDM-VTON at
+ * all (no shoe category in that model), so they're added as a second, localised
+ * Nano Banana pass on top of the already-correct IDM-VTON body — editing in just
+ * the shoes drifts far less than generating the whole scene from the base photo.
+ * Nano Banana alone is the fallback for open shirts/overshirts, or if either
+ * IDM-VTON step fails.
  */
 export async function generateFullLook(
   top: ClothingItem,
@@ -116,17 +122,30 @@ export async function generateFullLook(
   const cached = await findBlob(path).catch(() => null);
   if (cached) return cached;
 
-  try {
-    const generated = await generateLookNanoBanana(top, bottom, shoes, path);
-    if (generated) return generated;
-  } catch (err) {
-    console.error('[TRYON NANO-BANANA]', err);
+  if (isTryonFriendlyTop(top)) {
+    try {
+      const body = await generateIdmVtonFullLook(top, bottom, shoes ? `${path}.body.png` : path);
+      if (body) {
+        if (!shoes) return body;
+        try {
+          const withShoes = await addShoesNanoBanana(body, shoes, path);
+          if (withShoes) return withShoes;
+        } catch (err) {
+          console.error('[TRYON ADD-SHOES]', err);
+        }
+        // Shoes step failed — an identity-correct barefoot body beats risking a
+        // full nano-banana regeneration. Re-save under the outfit's own cache key.
+        return uploadImageFromUrl(body, path);
+      }
+    } catch (err) {
+      console.error('[TRYON IDM-VTON]', err);
+    }
   }
 
   try {
-    return await generateOutfitLook(top, bottom);
+    return await generateLookNanoBanana(top, bottom, shoes, path);
   } catch (err) {
-    console.error('[TRYON FALLBACK]', err);
+    console.error('[TRYON NANO-BANANA]', err);
     return null;
   }
 }
@@ -162,30 +181,46 @@ async function generateLookNanoBanana(
 }
 
 /**
- * Compose a full-look try-on: the top on the base photo, then the bottom on top of
- * that. Returns null when the top isn't try-on friendly, a piece has no image, or
- * Replicate isn't configured. Best-effort — callers must tolerate null.
+ * Add shoes to an already-dressed (IDM-VTON) body via a localised Nano Banana
+ * edit — a small, targeted change drifts far less than regenerating the whole
+ * scene from the base photo the way generateLookNanoBanana does.
  */
-export async function generateOutfitLook(
+async function addShoesNanoBanana(
+  bodyImageUrl: string,
+  shoes: ClothingItem,
+  outPath: string,
+): Promise<string | null> {
+  const replicate = getClient();
+  const prompt =
+    `This man is currently barefoot. Put the exact shoes shown in the second photo on ` +
+    `his feet — as the shoes: ${buildGarmentDescription(shoes)}. Keep his face, hair, ` +
+    `body, pose, his current top and trousers, and the background exactly as they are ` +
+    `in the first photo — only add the shoes onto his feet. Photorealistic, full body, ` +
+    `nothing else changes.`;
+
+  const output = await replicate.run('google/nano-banana', {
+    input: { prompt, image_input: [bodyImageUrl, shoes.imageUrl!], output_format: 'png' },
+  });
+  const tempUrl = extractUrl(output);
+  if (!tempUrl) return null;
+  return uploadImageFromUrl(String(tempUrl), outPath);
+}
+
+/**
+ * Compose a full-look try-on via two IDM-VTON passes: the bottom on the base
+ * photo, then the top over that. Bottom first, then the top over it — if we did
+ * the top first, a strongly coloured top bled its colour into the trousers on the
+ * second (lower-body) pass. Setting the trousers first and finishing with the
+ * upper body keeps both colours true.
+ */
+async function generateIdmVtonFullLook(
   top: ClothingItem,
   bottom: ClothingItem,
+  outPath: string,
 ): Promise<string | null> {
-  if (!process.env.REPLICATE_API_TOKEN || !process.env.TRYON_BASE_IMAGE) return null;
-  if (!isTryonFriendlyTop(top)) return null;
-  if (!top.imageUrl || !bottom.imageUrl) return null;
-
-  const base = `tryon/look-${top.id}-${bottom.id}`;
-  // Instant when pre-generated (or seen before) — the nightly cron warms this.
-  const cached = await findBlob(`${base}.png`).catch(() => null);
-  if (cached) return cached;
-
-  // Bottom first, then the top over it. If we did the top first, a strongly
-  // coloured top bled its colour into the trousers on the second (lower-body)
-  // pass. Setting the trousers first and finishing with the upper body keeps
-  // both colours true.
-  const step1 = await runTryonToPath(bottom, undefined, `${base}-bottom.png`);
+  const step1 = await runTryonToPath(bottom, undefined, `${outPath}.bottom-step.png`);
   if (!step1) return null;
-  return runTryonToPath(top, step1, `${base}.png`);
+  return runTryonToPath(top, step1, outPath);
 }
 
 /** Create a prediction without waiting (returns prediction ID) */
