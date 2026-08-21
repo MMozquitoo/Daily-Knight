@@ -11,7 +11,8 @@ import { buildDailyContext } from '../engine/context.js';
 import { toWardrobeItems } from '../types/adapter.js';
 import type { ClothingItem } from '../types/wardrobe.js';
 import * as sheets from '../services/sheets.js';
-import { fetchWeather, getUserLocation, formatWeatherSlack } from '../services/weather.js';
+import { fetchWeather, getUserLocation, formatWeatherSlack, fetchMonthlyClimateNormals } from '../services/weather.js';
+import { generateTripReturnReport } from '../services/tripReport.js';
 import { resolveDayPlace } from '../services/destination.js';
 import { fetchTodayAgenda, formatAgendaSlack } from '../services/calendar.js';
 import { todayStr } from '../services/dates.js';
@@ -171,6 +172,19 @@ app.command('/meteo', async ({ ack, respond }) => {
   });
 });
 
+app.command('/retour-pologne', async ({ ack, respond }) => {
+  await ack();
+  afterAck(async () => {
+    try {
+      await respond(':magic_wand: Je regarde ça...');
+      const report = await buildTripReport();
+      await respond(report);
+    } catch (err) {
+      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+  });
+});
+
 function isDM(message: { channel_type?: string }): boolean {
   return message.channel_type === 'im';
 }
@@ -189,6 +203,46 @@ async function generateAndSendOutfit(say: (msg: any) => Promise<any>) {
   });
   await say({ blocks: outfitMessage(recommendation, items, weather, null) as any });
   await sendLookFollowUp(recommendation, items, say);
+}
+
+/**
+ * Next N calendar months after `fromDate`, plus a reference year one year
+ * back to pull historical climate data for those same months (see
+ * fetchMonthlyClimateNormals — the archive API only has past data).
+ */
+function nextMonths(fromDate: Date, count: number): { months: number[]; referenceYear: number } {
+  const months: number[] = [];
+  let year = fromDate.getUTCFullYear();
+  let month = fromDate.getUTCMonth() + 1; // 1-12, current month
+  for (let i = 0; i < count; i++) {
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+    months.push(month);
+  }
+  return { months, referenceYear: year - 1 };
+}
+
+const POLAND_RETURN_DATE = '2026-08-27';
+
+async function buildTripReport(): Promise<string> {
+  const items = await sheets.getAll();
+  const polandItems = items.filter((i) => i.origine === 'Pologne');
+  const franceItems = items.filter((i) => i.origine !== 'Pologne');
+
+  const loc = getUserLocation();
+  const { months, referenceYear } = nextMonths(new Date(), 4);
+  const [climate, styleProfile] = await Promise.all([
+    fetchMonthlyClimateNormals(loc.lat, loc.lon, months, referenceYear),
+    getStyleProfileText().catch(() => undefined),
+  ]);
+
+  return generateTripReturnReport({
+    franceItems,
+    polandItems,
+    styleProfile,
+    climate,
+    returnDate: POLAND_RETURN_DATE,
+  });
 }
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -306,6 +360,7 @@ const ARMOIRE_PATTERN = /armoire|armario|wardrobe|garde-?robe|voir.*vêtements|m
 const AGENDA_PATTERN = /agenda|calendrier|calendar|réunion|événements|eventos/i;
 const METEO_PATTERN = /météo|meteo|weather|temps\s+qu'il\s+fait|clima/i;
 const STATS_PATTERN = /\bstats?\b|statistiques?|estad[íi]sticas?/i;
+const POLAND_PATTERN = /pologne|polonia|radom/i;
 const HELP_PATTERN = /aide|help|ayuda|commandes?|commands?|que\s+(sais|peux|puedes)/i;
 
 function findAudioFile(files: any[]): { id: string; mimetype: string; url_private_download?: string } | undefined {
@@ -435,6 +490,17 @@ async function routeTextMessage(
       await say({ blocks: savedItemMessage(item) as any });
     } catch (err) {
       await say(`:x: Erreur d'interprétation : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    }
+    return;
+  }
+
+  if (POLAND_PATTERN.test(text)) {
+    try {
+      await say(':magic_wand: Je regarde ça...');
+      const report = await buildTripReport();
+      await say(report);
+    } catch (err) {
+      await say(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     }
     return;
   }

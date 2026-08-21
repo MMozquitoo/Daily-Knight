@@ -160,6 +160,73 @@ export function getUserLocation(): { lat: number; lon: number } {
   };
 }
 
+export interface MonthlyClimate {
+  month: number; // 1-12
+  label: string; // "septembre"
+  avgTempMin: number;
+  avgTempMax: number;
+  rainyDaysPct: number; // % of days with meaningful precipitation
+}
+
+const FRENCH_MONTHS = [
+  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+];
+
+/**
+ * Open-Meteo's forecast API caps at 16 days — no help for a multi-month
+ * projection. There's no seasonal-forecast API either that's free/keyless, so
+ * this uses last year's actual weather for the same calendar months as a
+ * normals proxy (historical archive API, same provider, no key).
+ */
+export async function fetchMonthlyClimateNormals(
+  lat: number,
+  lon: number,
+  months: number[], // 1-12, e.g. [9, 10, 11, 12]
+  referenceYear: number,
+): Promise<MonthlyClimate[]> {
+  const start = `${referenceYear}-${months[0].toString().padStart(2, '0')}-01`;
+  const lastMonth = months[months.length - 1];
+  const endMonthLastDay = new Date(Date.UTC(referenceYear, lastMonth, 0)).getUTCDate();
+  const end = `${referenceYear}-${lastMonth.toString().padStart(2, '0')}-${endMonthLastDay}`;
+
+  const params = new URLSearchParams({
+    latitude: lat.toString(),
+    longitude: lon.toString(),
+    start_date: start,
+    end_date: end,
+    daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum',
+    timezone: 'auto',
+  });
+
+  const res = await fetch(`https://archive-api.open-meteo.com/v1/archive?${params}`);
+  if (!res.ok) throw new Error(`Climate archive API error: ${res.status}`);
+
+  const data = await res.json();
+  const daily = data.daily;
+  const days: number = daily?.time?.length ?? 0;
+
+  return months.map((month) => {
+    const idx = Array.from({ length: days }, (_, i) => i)
+      .filter((i) => Number(daily.time[i].slice(5, 7)) === month);
+
+    const tempMins = idx.map((i) => daily.temperature_2m_min[i]).filter((v) => v != null);
+    const tempMaxs = idx.map((i) => daily.temperature_2m_max[i]).filter((v) => v != null);
+    const rain = idx.map((i) => daily.precipitation_sum[i]).filter((v) => v != null);
+
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    const rainyDays = rain.filter((v) => v >= 1).length;
+
+    return {
+      month,
+      label: FRENCH_MONTHS[month - 1],
+      avgTempMin: Math.round(avg(tempMins)),
+      avgTempMax: Math.round(avg(tempMaxs)),
+      rainyDaysPct: rain.length ? Math.round((rainyDays / rain.length) * 100) : 0,
+    };
+  });
+}
+
 const CONDITION_EMOJI: Record<WeatherCondition, string> = {
   clear: ':sunny:',
   cloudy: ':cloud:',
