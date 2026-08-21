@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native projects — regenerated via `expo prebuild` (CNG), not hand-edited
+ios/
+android/
+
+# Xcode
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+project.xcworkspace
+xcuserdata/
+
+# Metro
+.metro-health-check*
+
+# Env
+.env*.local
+
+# macOS
+.DS_Store
+
+# Logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# TypeScript
+*.tsbuildinfo

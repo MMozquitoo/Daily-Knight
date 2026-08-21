@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Wardrobe Knight — Hoy",
+    "slug": "wardrobe-knight-hoy",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "sdkVersion": "54.0.0",
+    "ios": {
+      "bundleIdentifier": "com.anonymous.wardrobe-knight-hoy"
+    }
+  }
+}

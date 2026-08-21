@@ -1,0 +1,39 @@
+{
+  "name": "wardrobe-knight-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vertical slice de la pantalla Hoy — React Native + Expo. Ver Contrato de Pantallas v0.2 y El Bucle Hoy v0.1.",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --noEmit",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "react": "19.1.4",
+    "react-native": "0.81.6"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/plugin-transform-class-properties": "^7.29.7",
+    "@babel/plugin-transform-private-methods": "^7.29.7",
+    "@babel/preset-env": "^7.24.0",
+    "@babel/preset-typescript": "^7.24.0",
+    "@testing-library/react-native": "^12.5.0",
+    "@types/jest": "29.5.14",
+    "@types/react": "~19.1.10",
+    "@types/react-test-renderer": "^19.1.0",
+    "babel-preset-expo": "~54.0.10",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.18",
+    "react-test-renderer": "19.1.0",
+    "typescript": "~5.9.2"
+  },
+  "jest": {
+    "preset": "jest-expo"
+  }
+}
