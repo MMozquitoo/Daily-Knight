@@ -8,6 +8,9 @@
     "sdkVersion": "54.0.0",
     "ios": {
       "bundleIdentifier": "com.anonymous.wardrobe-knight-hoy"
+    },
+    "android": {
+      "package": "com.anonymous.wardrobeknighthoy"
     }
   }
 }
