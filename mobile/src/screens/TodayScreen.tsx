@@ -6,19 +6,20 @@ import { OutfitHero } from '../components/OutfitHero';
 import { WhyBlock } from '../components/WhyBlock';
 import { CarryBlock } from '../components/CarryBlock';
 import { TodayActions } from '../components/TodayActions';
+import { formatDateLabel } from '../dates';
 
 interface Props {
   outfit: TodayOutfit | null;
   status: TodayStatus;
   events: TodayEvents;
+  userName: string;
   onRegenerate?: () => void;
-  dateLabel?: string;
 }
 
 // Estados: loading, ready, accepted, error — Contrato de Pantallas v0.2.
 // "Sin fila de Planificación para hoy" -> error, con opción de
 // regenerar en vivo, no un error genérico.
-export function TodayScreen({ outfit, status: initialStatus, events, onRegenerate, dateLabel }: Props) {
+export function TodayScreen({ outfit, status: initialStatus, events, userName, onRegenerate }: Props) {
   const [status, setStatus] = useState<TodayStatus>(initialStatus);
 
   useEffect(() => {
@@ -57,8 +58,8 @@ export function TodayScreen({ outfit, status: initialStatus, events, onRegenerat
   return (
     <ScrollView contentContainerStyle={styles.screen} testID="today-screen">
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>{dateLabel ?? outfit.date}</Text>
-        <Text style={styles.greeting}>Bonjour Adrien</Text>
+        <Text style={styles.eyebrow}>{formatDateLabel(outfit.date)}</Text>
+        <Text style={styles.greeting}>Bonjour {userName}</Text>
       </View>
 
       <OutfitHero outfit={outfit} events={events} />
