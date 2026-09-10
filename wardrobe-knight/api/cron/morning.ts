@@ -27,6 +27,9 @@ export const config = {
 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
+// Optional second recipient (the operator) who gets the same daily outfit + avatar
+// as a live copy, for QA — separate from SLACK_USER_ID so Adrien's DM is untouched.
+const SLACK_ADMIN_USER_ID = process.env.SLACK_ADMIN_USER_ID ?? '';
 
 /** Give up on the look render before the cron budget does. */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
@@ -137,6 +140,16 @@ export default async function handler(req: Request, res: Response): Promise<void
       text: ':magic_wand: Bonjour ! Voici ta tenue du jour :',
       blocks: outfitMessage(recommendation, items, weather, look) as any,
     });
+
+    // Best-effort copy to the operator — never let this affect Adrien's delivery,
+    // which already succeeded above.
+    if (SLACK_ADMIN_USER_ID && SLACK_ADMIN_USER_ID !== SLACK_USER_ID) {
+      await slack.chat.postMessage({
+        channel: SLACK_ADMIN_USER_ID,
+        text: ':magic_wand: Copie — tenue du jour envoyée à Adrien :',
+        blocks: outfitMessage(recommendation, items, weather, look) as any,
+      }).catch((err) => console.error('[CRON MORNING ADMIN COPY]', err));
+    }
 
     await sheets.logWorn(todayStr(), {
       top: recommendation.wear.top,

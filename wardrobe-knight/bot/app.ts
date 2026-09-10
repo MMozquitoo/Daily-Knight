@@ -5,6 +5,7 @@
  */
 
 import { App, ExpressReceiver } from '@slack/bolt';
+import { Resend } from 'resend';
 import { signFileUrl } from '../api/_sign.js';
 import { generateOutfit, regenerateOutfit } from '../engine/index.js';
 import { buildDailyContext } from '../engine/context.js';
@@ -40,6 +41,26 @@ const app = new App({
   receiver,
   processBeforeResponse: true,
 });
+
+// Email copy of every advisor turn (Adrien's DM chat with the styling agent) so
+// the operator can see what to patch, without needing a Slack channel. Optional
+// — unset skips the mirror entirely.
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? '';
+const RESEND_EMAIL_DOMAIN = process.env.RESEND_EMAIL_DOMAIN ?? '';
+
+/** Best-effort mirror of one advisor turn. Never blocks or fails the user's reply. */
+function mirrorAdvisorTurn(userText: string, answer: string): void {
+  if (!resend || !ADMIN_EMAIL || !RESEND_EMAIL_DOMAIN) return;
+  resend.emails
+    .send({
+      from: `Mage Stylist <monitor@${RESEND_EMAIL_DOMAIN}>`,
+      to: [ADMIN_EMAIL],
+      subject: 'Adrien ↔ agent',
+      text: `Adrien :\n${userText}\n\nAgent :\n${answer}`,
+    })
+    .catch((err) => console.error('[ADVISOR MIRROR EMAIL]', err));
+}
 
 // --- State cache (per-instance, regeneration needs previous outfit) ---
 let lastRecommendation: OutfitRecommendation | null = null;
@@ -516,6 +537,7 @@ async function routeTextMessage(
         lastAgenda ?? undefined,
       );
       await say(answer);
+      mirrorAdvisorTurn(text, answer);
 
       // Show images for any item IDs mentioned in the response
       try {

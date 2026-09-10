@@ -121,8 +121,14 @@ export function toWardrobeItem(item: ClothingItem): WardrobeItem {
     },
     // A worn-out garment is still wearable — it should lose to a better one, not
     // vanish. It used to be filtered out entirely as 'unavailable'.
+    //
+    // Exception: pieces explicitly marked usableParis 'non' (e.g. the Pologne
+    // items Adrien decided not to bring back) stay 'unavailable' forever — the
+    // row (and its photo) stays in the sheet as a record, the engine just never
+    // proposes it. 'oui' and 'à vérifier' (including Paris-origin items, which
+    // never set this field) remain available.
     condition: item.etat,
-    availability: 'available',
+    availability: item.usableParis === 'non' ? 'unavailable' : 'available',
     layer: category,
     createdAt: new Date().toISOString(),
   };
