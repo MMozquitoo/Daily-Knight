@@ -14,12 +14,13 @@ interface Props {
   events: TodayEvents;
   userName: string;
   onRegenerate?: () => void;
+  onAccept?: () => void;
 }
 
 // Estados: loading, ready, accepted, error — Contrato de Pantallas v0.2.
 // "Sin fila de Planificación para hoy" -> error, con opción de
 // regenerar en vivo, no un error genérico.
-export function TodayScreen({ outfit, status: initialStatus, events, userName, onRegenerate }: Props) {
+export function TodayScreen({ outfit, status: initialStatus, events, userName, onRegenerate, onAccept }: Props) {
   const [status, setStatus] = useState<TodayStatus>(initialStatus);
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export function TodayScreen({ outfit, status: initialStatus, events, userName, o
         onAccept={() => {
           events.accepted(outfit.date);
           setStatus('accepted');
+          onAccept?.();
         }}
         onSwap={() => events.swapped(outfit.date, 'top')}
         onRegenerate={() => {

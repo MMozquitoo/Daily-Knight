@@ -1,0 +1,145 @@
+/**
+ * Item Scorer — Step 2
+ *
+ * Assigns a numeric score (0–100) to each filtered wardrobe item.
+ * Weights come from constants/scoring.ts.
+ */
+
+import {
+  ACCESSORY_SCORE_MIN,
+  CONDITION_MULTIPLIER,
+  CONTEXT_SCORES,
+  FEEDBACK_CAP,
+  FEEDBACK_STEP,
+  FORMALITY_SCORES,
+  HOT_TEMP,
+  RULE_AVOID_PENALTY,
+  RULE_PREFER_BONUS,
+  STYLE_SCORES,
+  WEATHER_BONUSES,
+  WEATHER_WEIGHT,
+} from '../constants/scoring';
+import type { DailyContext } from '../types/context';
+import type { StyleRule } from '../types/rules';
+import type { WardrobeItem } from '../types/wardrobe';
+import type { ScoredItem } from './types';
+import {
+  dayTemperature,
+  getDayContextTag,
+  getFormalityDistance,
+  getRequiredFormality,
+  isHotDay,
+  isRainyDay,
+  isShortsWeather,
+  isWindyDay,
+  ruleApplies,
+  ruleTargets,
+} from './utils';
+
+function scoreWeather(item: WardrobeItem, context: DailyContext): number {
+  const temp = dayTemperature(context);
+  const center = (item.weatherSuitability.minTemp + item.weatherSuitability.maxTemp) / 2;
+  const distance = Math.abs(temp - center);
+  let score = distance <= 4 ? WEATHER_BONUSES.exactTempFit : WEATHER_BONUSES.nearTempFit;
+
+  if (isRainyDay(context) && item.weatherSuitability.rainOk) score += WEATHER_BONUSES.rainSafe;
+  if (isWindyDay(context) && item.weatherSuitability.windOk) score += WEATHER_BONUSES.windySafe;
+  if (item.category === 'outerwear' && temp < HOT_TEMP) score += WEATHER_BONUSES.outerwearOnColdDay;
+  if (item.category === 'shoes' && item.type !== 'sandals' && (isRainyDay(context) || isWindyDay(context))) {
+    score += WEATHER_BONUSES.closedShoesOnWetDay;
+  }
+  if (isHotDay(context) && item.category === 'outerwear') score += WEATHER_BONUSES.hotDayHeavyPenalty;
+  if (isHotDay(context) && item.type === 'boots') score += WEATHER_BONUSES.bootsOnHotDay;
+
+  // Warm day: reach for the shorts before the trousers
+  if (isShortsWeather(context)) {
+    if (item.type === 'shorts') score += WEATHER_BONUSES.shortsOnHotDay;
+    if (item.type === 'pants' || item.type === 'jeans') score += WEATHER_BONUSES.longLegsOnHotDay;
+  }
+
+  return Math.max(0, Math.min(WEATHER_WEIGHT, score));
+}
+
+function scoreFormality(item: WardrobeItem, context: DailyContext): number {
+  const distance = getFormalityDistance(item.formality, getRequiredFormality(context));
+  if (distance === 0) return FORMALITY_SCORES.exact;
+  if (distance === 1) return FORMALITY_SCORES.oneStepAway;
+  return FORMALITY_SCORES.twoStepsAway;
+}
+
+function scoreContext(item: WardrobeItem, context: DailyContext): number {
+  const tag = getDayContextTag(context);
+  if (item.contexts.includes(tag)) return CONTEXT_SCORES.exact;
+  if (context.agenda.dayType === 'mixed') return CONTEXT_SCORES.mixedDayFallback;
+  if (context.agenda.meetingsCount === 0) return CONTEXT_SCORES.noMeetingsFallback;
+  return CONTEXT_SCORES.mismatch;
+}
+
+function scoreStyle(item: WardrobeItem, context: DailyContext): number {
+  if (context.userStylePreference === 'mixed') return STYLE_SCORES.mixed;
+  const distance = getFormalityDistance(item.formality, context.userStylePreference);
+  if (distance === 0) return STYLE_SCORES.exact;
+  if (distance === 1) return STYLE_SCORES.adjacent;
+  return STYLE_SCORES.mismatch;
+}
+
+function getCooldownMultiplier(itemId: string, recentlyWorn?: Map<string, number>): number {
+  if (!recentlyWorn) return 1;
+  const daysSinceWorn = recentlyWorn.get(itemId);
+  if (daysSinceWorn === undefined) return 1;
+  if (daysSinceWorn <= 1) return 0;
+  if (daysSinceWorn === 2) return 0.4;
+  if (daysSinceWorn === 3) return 0.7;
+  return 1;
+}
+
+/** Net 👍/👎 votes → a bounded point shift added before the multipliers. */
+function getFeedbackBonus(itemId: string, feedbackScores?: Map<string, number>): number {
+  if (!feedbackScores) return 0;
+  const net = feedbackScores.get(itemId);
+  if (!net) return 0;
+  return Math.max(-FEEDBACK_CAP, Math.min(FEEDBACK_CAP, net * FEEDBACK_STEP));
+}
+
+/** Spoken rules ("pas de chemise à la maison") → a decisive shift when in force today. */
+function getRuleAdjustment(item: WardrobeItem, context: DailyContext, styleRules?: StyleRule[]): number {
+  if (!styleRules?.length) return 0;
+  let adjustment = 0;
+  for (const rule of styleRules) {
+    if (!ruleApplies(rule, context) || !ruleTargets(rule, item)) continue;
+    adjustment += rule.action === 'eviter' ? RULE_AVOID_PENALTY : RULE_PREFER_BONUS;
+  }
+  return adjustment;
+}
+
+export function scoreItems(
+  items: WardrobeItem[],
+  context: DailyContext,
+  recentlyWorn?: Map<string, number>,
+  feedbackScores?: Map<string, number>,
+  styleRules?: StyleRule[],
+): ScoredItem[] {
+  return items
+    .map((item) => {
+      const breakdown = {
+        weather: scoreWeather(item, context),
+        formality: scoreFormality(item, context),
+        context: scoreContext(item, context),
+        style: scoreStyle(item, context),
+      };
+      const rawScore = breakdown.weather + breakdown.formality + breakdown.context + breakdown.style;
+      const wear = CONDITION_MULTIPLIER[item.condition] ?? 1;
+      const feedback = getFeedbackBonus(item.id, feedbackScores);
+      const rules = getRuleAdjustment(item, context, styleRules);
+      return {
+        item,
+        breakdown,
+        score: Math.max(0, rawScore + feedback + rules) * getCooldownMultiplier(item.id, recentlyWorn) * wear,
+      };
+    })
+    .filter((entry) => {
+      if (entry.item.category !== 'accessories') return true;
+      return entry.score >= ACCESSORY_SCORE_MIN;
+    })
+    .sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name));
+}

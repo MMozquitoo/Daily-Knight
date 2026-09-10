@@ -23,6 +23,7 @@ xcuserdata/
 .metro-health-check*
 
 # Env
+.env
 .env*.local
 
 # macOS
