@@ -24,9 +24,8 @@ function itemDisplayName(item: ClothingItem): string {
 /**
  * The daily outfit message — built mobile-first after Adrien's review:
  * the try-on visual comes FIRST, the weather is one line (no Plage/Pluie/Vent),
- * and everything fits without Slack's "View Full Message" fold. On mobile every
- * button renders as a full-width row, so per-piece 👍/👎 buttons cost 8 rows —
- * feedback lives in ONE compact select menu instead.
+ * and everything fits without Slack's "View Full Message" fold. Only one action
+ * is offered: regenerating a bike-friendly outfit for the day.
  *
  * `look` controls the imagery:
  *   - a URL      → ONE image on top: the user wearing the whole outfit
@@ -59,22 +58,6 @@ export function outfitMessage(
     .map(({ id, label }) => itemLine(id, label))
     .filter(Boolean);
   porterLines.push(...recommendation.wear.accessories.map((id) => itemLine(id, ':ring: Acc')).filter(Boolean));
-
-  // One select = one row on mobile, instead of a wall of stacked buttons.
-  // Same values ("like:ID"/"dislike:ID") and action_id as the original overflow,
-  // so the existing handler keeps working for old and new messages alike.
-  const feedbackOptions = pieces
-    .filter((p): p is { id: string; label: string; short: string } => Boolean(p.id))
-    .flatMap(({ id, short }) => {
-      const item = itemMap.get(id);
-      const name = item ? itemDisplayName(item) : short;
-      // plain_text option labels are capped at 75 chars
-      const display = name.length > 60 ? `${name.slice(0, 57)}…` : name;
-      return [
-        { text: { type: 'plain_text', text: `👍 ${display}`, emoji: true }, value: `like:${id}` },
-        { text: { type: 'plain_text', text: `👎 ${display}`, emoji: true }, value: `dislike:${id}` },
-      ];
-    });
 
   const carryLine = recommendation.carry.length > 0
     ? `*Emporter :* ${recommendation.carry.map((c) => CARRY_LABELS[c]).join(' · ')}`
@@ -123,20 +106,6 @@ export function outfitMessage(
     },
   ];
 
-  if (feedbackOptions.length) {
-    blocks.push({
-      type: 'actions',
-      elements: [
-        {
-          type: 'static_select',
-          action_id: 'item_feedback',
-          placeholder: { type: 'plain_text', text: '👍👎 Noter une pièce', emoji: true },
-          options: feedbackOptions,
-        },
-      ],
-    });
-  }
-
   // Small print: why + what to carry, in a context block (renders compact)
   const contextText = [`_${recommendation.why}_`, carryLine].filter(Boolean).join('\n');
   blocks.push(
@@ -149,17 +118,8 @@ export function outfitMessage(
       elements: [
         {
           type: 'button',
-          text: { type: 'plain_text', text: ':arrows_counterclockwise: Changer de tenue', emoji: true },
-          action_id: 'regenerate_outfit',
-          // Carry the shown outfit in the button so regenerate works on any cold
-          // serverless instance, not only the one that posted the message.
-          value: [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes].filter(Boolean).join(','),
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: ':arrow_up: Plus formel', emoji: true },
-          action_id: 'more_formal',
-          value: [recommendation.wear.top, recommendation.wear.bottom, recommendation.wear.shoes].filter(Boolean).join(','),
+          text: { type: 'plain_text', text: ':bike: Tenue pour vélo', emoji: true },
+          action_id: 'bike_outfit',
         },
       ],
     },

@@ -123,6 +123,11 @@ OUTILS TENUE & RÈGLES DE STYLE — c'est comme ça que tu APPRENDS :
   veut plus casual / plus formel (« régénère », « propose autre chose », « je veux être
   tranquille aujourd'hui »). Mentionne ensuite chaque pièce par nom + ID — les images
   s'affichent automatiquement.
+  → Cas particulier VÉLO : dès que l'utilisateur demande une tenue pour faire du vélo/la
+  bicyclette (« je fais du vélo aujourd'hui », « tenue vélo », « quelque chose pour
+  pédaler »), appelle suggest_outfit(max_formality="casual", avoid_types=["skirt"]) — c'est
+  exactement ce que fait le bouton :bike: Tenue pour vélo du message du matin, pour rester
+  cohérent entre le chat et les boutons.
 - save_style_rule : TRÈS IMPORTANT. Dès que l'utilisateur exprime une règle vestimentaire
   durable — « pas de chemise quand je suis à la maison », « jamais de boots l'été », « je
   préfère les sneakers au bureau » — sauvegarde une règle STRUCTURÉE avec cet outil. C'est

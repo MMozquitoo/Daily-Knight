@@ -7,7 +7,7 @@
 import { App, ExpressReceiver } from '@slack/bolt';
 import { Resend } from 'resend';
 import { signFileUrl } from '../api/_sign.js';
-import { generateOutfit, regenerateOutfit } from '../engine/index.js';
+import { generateOutfit } from '../engine/index.js';
 import { buildDailyContext } from '../engine/context.js';
 import { toWardrobeItems } from '../types/adapter.js';
 import type { ClothingItem } from '../types/wardrobe.js';
@@ -597,39 +597,17 @@ app.message(async ({ message, say }) => {
   await routeTextMessage(message.text, reply, userId, isDM(message));
 });
 
-app.action('regenerate_outfit', async ({ ack, respond, action }) => {
-  await ack();
-  const shownIds = ((action as { value?: string }).value ?? '').split(',').filter(Boolean);
-  afterAck(async () => {
-    try {
-      const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
-      // The shown outfit rides in the button value, so regenerate works on any cold
-      // serverless instance — lastRecommendation module state is often null there,
-      // which used to make "regenerate" return the same outfit.
-      const excludeIds = shownIds.length ? shownIds.slice(0, 2) : [];
-      const recommendation = regenerateOutfit(wardrobeItems, context, excludeIds, recentlyWorn, feedbackScores, styleRules);
-      lastRecommendation = recommendation;
-      await sheets.logWorn(todayStr(), {
-        top: recommendation.wear.top,
-        bottom: recommendation.wear.bottom,
-        shoes: recommendation.wear.shoes,
-        outerwear: recommendation.wear.outerwear,
-      });
-      await respond({ replace_original: true, blocks: outfitMessage(recommendation, items, weather, null) as any });
-      await sendLookFollowUp(recommendation, items, (msg) => respond({ ...msg, replace_original: false }));
-    } catch (err) {
-      await respond(`:x: Erreur : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
-    }
-  });
-});
-
-app.action('more_formal', async ({ ack, respond }) => {
+// The only regenerate action left on the outfit message: swap today's pick for
+// something casual and easy to pedal in — no skirts, formality pinned to casual.
+app.action('bike_outfit', async ({ ack, respond }) => {
   await ack();
   afterAck(async () => {
     try {
       const { weather, items, wardrobeItems, context, recentlyWorn, feedbackScores, styleRules } = await getOutfitContext();
-      context.agenda = { ...context.agenda, highestFormality: 'formal' };
-      const recommendation = generateOutfit(wardrobeItems, context, recentlyWorn, feedbackScores, styleRules);
+      context.userStylePreference = 'casual';
+      context.agenda = { ...context.agenda, highestFormality: 'casual' };
+      const bikeFriendlyItems = wardrobeItems.filter((item) => item.type !== 'skirt');
+      const recommendation = generateOutfit(bikeFriendlyItems, context, recentlyWorn, feedbackScores, styleRules);
       lastRecommendation = recommendation;
       await sheets.logWorn(todayStr(), {
         top: recommendation.wear.top,
