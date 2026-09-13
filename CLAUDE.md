@@ -81,6 +81,12 @@ Authentication: Google service account via `GOOGLE_SERVICE_ACCOUNT_JSON` env var
 
 See `.env.example` for the full list. Required: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_TOKEN`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID`, `ANTHROPIC_API_KEY`.
 
+### Vercel Blob storage
+
+Wardrobe photos and try-on renders live in a **dedicated** Blob store named `wardrobe-knight` (`store_VR8ZIQlYlNTzbVmo`, connected to the `daily-knight` project in all environments). It was recreated 2026-09-13 — a previous session had `BLOB_READ_WRITE_TOKEN` pointing at a *different* project's store (`fast-attio-data`) by mistake, so wardrobe images were living in another app's storage for months. If image URLs in the sheet or `.env*` ever reference a host other than this store's, that's the same class of bug — check `BLOB_READ_WRITE_TOKEN`'s store-id segment (`vercel_blob_rw_<storeId>_...`) against `vercel blob get-store` for this project, don't assume it's correct.
+
+**CLI gotcha (cost real data once — see fast-attio's CLAUDE.md):** `vercel blob empty-store` does **not** accept a store-id argument (check `--help` — its usage line is `[options]` only, unlike `delete-store` and `get-store` which do take one). Passing one anyway is silently ignored; the command acts on some ambient/last-used store instead. Never run `empty-store` to target a specific store by ID — get that store's own token and use `@vercel/blob`'s `list()`/`del()` explicitly, or delete from the dashboard.
+
 ## Key Design Decisions
 
 - **No backend/database server** — Google Sheets is the single source of truth, editable by hand.
