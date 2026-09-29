@@ -1,6 +1,13 @@
 {
   "buildCommand": "",
+  "fluid": true,
   "functions": {
+    "api/cron/morning.ts": {
+      "maxDuration": 300
+    },
+    "api/cron/evening.ts": {
+      "maxDuration": 300
+    },
     "api/**/*.ts": {
       "maxDuration": 60
     }

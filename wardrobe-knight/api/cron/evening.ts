@@ -10,7 +10,7 @@ import * as sheets from '../../services/sheets.js';
 import type { ClothingItem } from '../../types/wardrobe.js';
 import { categoryFromSheet } from '../../types/wardrobe.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 60 };
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 const LAUNDRY_INTERVAL_DAYS = 3;
@@ -101,6 +101,7 @@ export default async function handler(req: Request, res: Response): Promise<void
   const messages: string[] = [];
 
   try {
+    const startedAt = Date.now();
     // --- 1. TRAVEL ALERT: detect trips starting tomorrow or in 2 days ---
     const trips = await detectTrips(3);
     const tomorrow = new Date();
@@ -171,7 +172,7 @@ export default async function handler(req: Request, res: Response): Promise<void
     }
 
     // Pre-generate tomorrow's virtual try-on so the morning delivery is instant.
-    // Best-effort and last (it's the slow part). generateOutfitLook caches to a
+    // Best-effort and last (it's the slow part). generateFullLook caches to a
     // deterministic path, so the morning cron gets an immediate cache hit.
     let pregen: string | null = null;
     try {
@@ -182,7 +183,10 @@ export default async function handler(req: Request, res: Response): Promise<void
         const bottomItem = items.find((i) => i.id === planned.bottom);
         const shoesItem = items.find((i) => i.id === planned.shoes);
         if (topItem && bottomItem) {
-          pregen = await generateFullLook(topItem, bottomItem, shoesItem);
+          const remaining = Math.min(180_000, 270_000 - (Date.now() - startedAt));
+          if (remaining > 5000) {
+            pregen = await generateFullLook(topItem, bottomItem, shoesItem, { timeoutMs: remaining });
+          }
         }
       }
     } catch (err) {

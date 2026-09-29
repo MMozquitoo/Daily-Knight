@@ -20,24 +20,14 @@ import { generateFullLook } from '../../services/tryon.js';
 
 export const config = {
   runtime: 'nodejs',
-  // Bumped for the virtual try-on: the full-look render (~20-50s uncached, instant
-  // when the evening cron pre-warmed it) runs BEFORE the outfit is posted so the
-  // message ships with its single image.
-  maxDuration: 60,
+  // Fluid Compute; leave time for data loading, three image passes and delivery.
+  maxDuration: 300,
 };
 
 const SLACK_USER_ID = process.env.SLACK_USER_ID ?? '';
 // Optional second recipient (the operator) who gets the same daily outfit + avatar
 // as a live copy, for QA — separate from SLACK_USER_ID so Adrien's DM is untouched.
 const SLACK_ADMIN_USER_ID = process.env.SLACK_ADMIN_USER_ID ?? '';
-
-/** Give up on the look render before the cron budget does. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return Promise.race([
-    promise,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
-  ]);
-}
 
 /**
  * A plan is written on Sunday; a rule can be spoken on Wednesday. If the planned
@@ -72,6 +62,7 @@ export default async function handler(req: Request, res: Response): Promise<void
   }
 
   try {
+    const startedAt = Date.now();
     const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
     const loc = getUserLocation();
 
@@ -126,7 +117,10 @@ export default async function handler(req: Request, res: Response): Promise<void
       const bottomItem = items.find((i) => i.id === recommendation.wear.bottom);
       const shoesItem = items.find((i) => i.id === recommendation.wear.shoes);
       if (topItem && bottomItem) {
-        look = await withTimeout(generateFullLook(topItem, bottomItem, shoesItem), 40_000);
+        const remaining = Math.min(180_000, 240_000 - (Date.now() - startedAt));
+        if (remaining > 5000) {
+          look = await generateFullLook(topItem, bottomItem, shoesItem, { timeoutMs: remaining });
+        }
       }
     } catch (err) {
       console.error('[CRON MORNING TRYON]', err);

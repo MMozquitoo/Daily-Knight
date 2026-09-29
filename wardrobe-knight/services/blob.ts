@@ -1,9 +1,9 @@
 import { put, list } from '@vercel/blob';
 
 /** Return the public URL of an already-stored blob at this path, or null. */
-export async function findBlob(filename: string): Promise<string | null> {
+export async function findBlob(filename: string, abortSignal?: AbortSignal): Promise<string | null> {
   const pathname = `wardrobe-knight/${filename}`;
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
+  const { blobs } = await list({ prefix: pathname, limit: 1, abortSignal });
   const hit = blobs.find((b) => b.pathname === pathname);
   return hit ? hit.url : null;
 }
@@ -31,12 +31,14 @@ export async function uploadImageBuffer(
   buffer: Buffer,
   filename: string,
   contentType: string = 'image/png',
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   const blob = await put(`wardrobe-knight/${filename}`, buffer, {
     access: 'public',
     contentType,
     addRandomSuffix: false,
     allowOverwrite: true,
+    abortSignal,
   });
 
   return blob.url;
